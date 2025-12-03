@@ -184,6 +184,6 @@ class BaseForecaster(ABC):
 
         # Handle missing values
         if y.isna().any():
-            y = y.interpolate(method="linear").fillna(method="bfill").fillna(method="ffill")
+            y = y.interpolate(method="linear").bfill().ffill()
 
         return y

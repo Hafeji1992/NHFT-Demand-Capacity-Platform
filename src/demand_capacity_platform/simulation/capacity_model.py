@@ -248,8 +248,7 @@ class CapacityModel:
         estimated_backlog = new_demand * 2
         wait_time = self.estimate_wait_time(estimated_backlog, new_capacity, new_demand)
 
-        # This is a simplified scenario - in practice, FTE calc would need more inputs
-        (capacity_change_pct / 100) * base_metrics.fte_required
+        # Calculate new FTE requirement based on demand change
         new_fte = base_metrics.fte_required * (1 + demand_change_pct / 100)
 
         return CapacityMetrics(
