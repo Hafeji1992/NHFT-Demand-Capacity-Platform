@@ -187,8 +187,6 @@ As defined in the Project Plan (Section 2, p. 1) :
 
 ## 12. Project Status
 
-## 12. Project Status
-
 | Workstream / Phase                         | Status        | Target Completion | Notes |
 |--------------------------------------------|--------------|-------------------|--------|
 | Project Documentation & Governance         | ✅ Completed | Early Dec 2025    | Project Agreement, Plan, Methodology, Ethics & Legal all completed |
@@ -278,5 +276,4 @@ flowchart TD
     Capacity_Modelling --> Forecasting_Engine 
     Forecasting_Engine --> Simulation
     Simulation --> Dashboard_App
-
     ```
