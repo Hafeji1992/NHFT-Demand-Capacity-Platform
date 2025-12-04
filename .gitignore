@@ -1,102 +1,73 @@
-# ============================
-# Temporary ignore files
-# ============================
-config.ini
-
-
-# ============================
+# ==========================================
 # Python
-# ============================
+# ==========================================
 __pycache__/
-*.pyc
+*.py[cod]
 *.pyo
 *.pyd
-*.pkl
-*.pickle
-*.joblib
+*.so
 
 # Virtual environments
-.env/
-.venv/
 venv/
-ENV/
 env/
+.venv/
 
-# Jupyter Notebook checkpoints
+# Jupyter notebooks checkpoints
 .ipynb_checkpoints/
 
-# ============================
-# Environment & config
-# ============================
-# Do NOT ignore config.ini (safe, contains no secrets)
-# But ignore any secret files
-*.secret
-*.key
-*.token
-*.credentials
-*.env.local
+# ==========================================
+# Environment / Sensitive Files
+# ==========================================
+config.ini
+*.env
+.env.*
+secrets/
+credentials/
 
-# Python dotenv files (if used for DB passwords)
-.env.production
-.env.dev
-.env.test
+# Prevent accidental storage of local data extracts
+data/
+*.csv
+*.xlsx
+*.parquet
+*.json
 
-# ============================
-# Logs
-# ============================
+# ==========================================
+# Logs & cache
+# ==========================================
 *.log
 logs/
-logging/
+*.pid
+cache/
+*.cache
 
-# ============================
-# OS Files
-# ============================
-.DS_Store
-Thumbs.db
-
-# ============================
-# Build / Packaging
-# ============================
+# ==========================================
+# Compiled / Distribution
+# ==========================================
 build/
 dist/
 *.egg-info/
+.eggs/
 
-# ============================
-# SQL / Data Protection
-# ============================
-# DO NOT COMMIT ANY DATA FROM NHFT
-*.csv
-*.xlsx
-*.xls
-*.parquet
-*.feather
-*.json
-*.sql
-*.bak
+# ==========================================
+# IDE / Editor files
+# ==========================================
+.vscode/
+.idea/
+*.swp
+*.swo
 
-data/
-raw_data/
-processed_data/
-
-# ============================
-# Dash / Web artefacts
-# ============================
+# ==========================================
+# Dash / Plotly Artifacts
+# ==========================================
 *.map
-*.cache/
-cache/
+*.hot-update.json
 
-# ============================
-# Testing artefacts
-# ============================
-htmlcov/
-.coverage
-.cache/
-pytest_cache/
+# ==========================================
+# OS Files
+# ==========================================
+.DS_Store
+Thumbs.db
 
-# Temp files
-tmp/
-temp/
-*.tmp
 
 # ============================
 # Idea / Editor settings
