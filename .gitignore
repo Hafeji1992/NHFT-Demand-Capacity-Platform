@@ -1,0 +1,132 @@
+# ============================
+# Temporary ignore files
+# ============================
+config.ini
+
+
+# ============================
+# Python
+# ============================
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pkl
+*.pickle
+*.joblib
+
+# Virtual environments
+.env/
+.venv/
+venv/
+ENV/
+env/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# ============================
+# Environment & config
+# ============================
+# Do NOT ignore config.ini (safe, contains no secrets)
+# But ignore any secret files
+*.secret
+*.key
+*.token
+*.credentials
+*.env.local
+
+# Python dotenv files (if used for DB passwords)
+.env.production
+.env.dev
+.env.test
+
+# ============================
+# Logs
+# ============================
+*.log
+logs/
+logging/
+
+# ============================
+# OS Files
+# ============================
+.DS_Store
+Thumbs.db
+
+# ============================
+# Build / Packaging
+# ============================
+build/
+dist/
+*.egg-info/
+
+# ============================
+# SQL / Data Protection
+# ============================
+# DO NOT COMMIT ANY DATA FROM NHFT
+*.csv
+*.xlsx
+*.xls
+*.parquet
+*.feather
+*.json
+*.sql
+*.bak
+
+data/
+raw_data/
+processed_data/
+
+# ============================
+# Dash / Web artefacts
+# ============================
+*.map
+*.cache/
+cache/
+
+# ============================
+# Testing artefacts
+# ============================
+htmlcov/
+.coverage
+.cache/
+pytest_cache/
+
+# Temp files
+tmp/
+temp/
+*.tmp
+
+# ============================
+# Idea / Editor settings
+# ============================
+# Ignore all of .idea folder by default
+.idea/*
+
+# Allow some project-specific settings
+!.idea/codeStyles/
+!.idea/deployment.xml
+!.idea/modules.xml
+!.idea/vcs.xml
+!.idea/workspace.xml
+
+# Ignore user-specific or OS-specific settings
+.idea/workspace.xml
+.idea/tasks.xml
+.idea/dictionaries
+.idea/libraries
+.idea/assetWizardSettings.xml
+.idea/jsLibraryMappings.xml
+.idea/shelf
+
+# Ignore IDE caches
+.idea/dataSources/
+.idea/dataSources.ids
+.idea/dataSources.local.xml
+.idea/sqlDataSources.xml
+.idea/dynamic.xml
+.idea/uiDesigner.xml
+.idea/httpRequests
+.idea/inspectionProfiles
+.idea/runConfigurations/
