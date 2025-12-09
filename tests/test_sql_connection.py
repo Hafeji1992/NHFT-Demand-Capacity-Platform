@@ -1,59 +1,46 @@
-import configparser
-import pyodbc
 import sys
+import os
+
+# Ensure project root is on the Python path
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(project_root)
+
+from src.data_engineering.connect import SQLServerConnection
 
 
-def load_config(
-    path="C:\\Users\\yhafeji\\Desktop\\Level 6 Data Science\\(ZDAT3001 UNUK) (FYR1 25-26) Work-Based Project (Assessment)\\NHFT-Demand-Capacity-Platform\\config.ini",
-):
-    """Load SQL Server connection details from config.ini."""
-    config = configparser.ConfigParser()
+def test_connection():
+    """
+    Test SQL Server connectivity using the reusable SQLServerConnection class.
+    """
 
-    try:
-        config.read(path)
-        sql_config = config["sqlserver"]
-
-        return {
-            "server": sql_config["server"],
-            "database": sql_config["database"],
-            "driver": sql_config["driver"],
-            "trusted": sql_config.get("trusted_connection", "Yes"),
-        }
-    except Exception as e:
-        print(f"[ERROR] Unable to load config.ini: {e}")
-        sys.exit(1)
-
-
-def test_connection(config):
-    """Attempt connection to SQL Server and perform a simple test query."""
     print("\n=== SQL CONNECTION TEST ===")
-    print(f"Server:   {config['server']}")
-    print(f"Database: {config['database']}")
-    print(f"Driver:   {config['driver']}")
-    print("Attempting connection...\n")
 
     try:
-        conn_str = (
-            f"DRIVER={{{config['driver']}}};"
-            f"SERVER={config['server']};"
-            f"DATABASE={config['database']};"
-            f"Trusted_Connection={config['trusted']};"
-        )
+        # Instantiate connection handler
+        db = SQLServerConnection()
 
-        conn = pyodbc.connect(conn_str)
-        cursor = conn.cursor()
-
+        # Attempt connection
+        conn = db.connect()
         print("[SUCCESS] Connected to SQL Server.")
 
-        conn.close()
+        # Run a simple metadata query to verify database access
+        cursor = conn.cursor()
+        cursor.execute("SELECT TOP 5 name FROM sys.objects ORDER BY name;")
+        rows = cursor.fetchall()
+
+        print("\nTest query returned:")
+        for row in rows:
+            print(f" - {row[0]}")
+
+        # Close connection
+        db.close()
         print("\nConnection closed successfully.")
 
     except Exception as e:
-        print("\n[ERROR] Connection failed:")
+        print("\n[ERROR] Connection test failed:")
         print(e)
         sys.exit(1)
 
 
 if __name__ == "__main__":
-    config = load_config()
-    test_connection(config)
+    test_connection()
