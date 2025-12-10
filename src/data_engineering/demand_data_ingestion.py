@@ -308,13 +308,13 @@ class DemandDataExtractor:
             if 'cursor' in locals():
                 cursor.close()
 
-    def save_to_csv(self, df: pd.DataFrame, filename: str = "Demand_Modelling.csv") -> Path:
+    def save_to_csv(self, df: pd.DataFrame, filename: str = "demand_data.csv") -> Path:
         """
         Save DataFrame to CSV file.
 
         Args:
             df: pandas DataFrame to save
-            filename: Name of the CSV file (default: Demand_Modelling.csv)
+            filename: Name of the CSV file (default: demand_data.csv)
 
         Returns:
             Path: Path to the saved CSV file
@@ -362,7 +362,7 @@ def load_demand_data(csv_path: Optional[str] = None) -> pd.DataFrame:
     Utility function to load demand data from CSV.
 
     Args:
-        csv_path: Path to CSV file. If None, loads Demand_Modelling.csv
+        csv_path: Path to CSV file. If None, loads demand_data.csv
                   from default location.
 
     Returns:
@@ -373,7 +373,7 @@ def load_demand_data(csv_path: Optional[str] = None) -> pd.DataFrame:
     """
     if csv_path is None:
         project_root = Path(__file__).resolve().parents[2]
-        csv_path = project_root / "data" / "Demand_Modelling.csv"
+        csv_path = project_root / "data" / "demand_data.csv"
     else:
         csv_path = Path(csv_path)
 
@@ -394,7 +394,7 @@ if __name__ == "__main__":
             # Extract data from SQL Server
             df = extractor.extract_demand_data()
 
-            # Save as Demand_Modelling.csv
+            # Save as demand_data.csv
             output_file = extractor.save_to_csv(df)
 
             if output_file:
