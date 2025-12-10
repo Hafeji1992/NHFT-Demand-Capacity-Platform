@@ -23,15 +23,6 @@ def test_connection():
         conn = db.connect()
         print("[SUCCESS] Connected to SQL Server.")
 
-        # Run a simple metadata query to verify database access
-        cursor = conn.cursor()
-        cursor.execute("SELECT TOP 5 name FROM sys.objects ORDER BY name;")
-        rows = cursor.fetchall()
-
-        print("\nTest query returned:")
-        for row in rows:
-            print(f" - {row[0]}")
-
         # Close connection
         db.close()
         print("\nConnection closed successfully.")
