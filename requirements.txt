@@ -27,3 +27,5 @@ pytest>=7.4.0
 # (Optional but recommended) Logging and configuration helpers
 loguru>=0.7.0
 pydantic>=2.0.0
+
+tqdm
