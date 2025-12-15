@@ -1,9 +1,9 @@
 import logging
-import os
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict, List, Tuple
 import pandas as pd
 from tqdm import tqdm
+
 from data_engineering.connect import SQLServerConnection
 
 # Configure logging
@@ -12,6 +12,11 @@ logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
+
+
+class DataQualityException(Exception):
+    """Custom exception for data quality failures."""
+    pass
 
 
 class DemandDataExtractor:
@@ -208,17 +213,32 @@ class DemandDataExtractor:
             WT.[PeriodEnd]
     """
 
+    # Expected columns after normalisation
+    EXPECTED_COLUMNS = [
+        'providercodecurrent', 'service_line', 'periodend', 'referrals',
+        'clockstopactuals', 'dischargesnoclockstop', 'referralclockstopratio',
+        'referraldischargednoclockstopratio', 'demandratio', 'totalcontacts',
+        'ftfcontacts', 'caseload', 'totalcaseloadcontacts', 'ftfcaseloadcontacts',
+        'totalcontactspercaseload', 'ftfcontactspercaseload', 'waiters',
+        'waitersunder18weeks', 'waiters18plusweeks', 'averagelengthoftreatment',
+        'averagecontactsatdischarge', 'averageftfcontactsatdischarge',
+        'dischargesfromcaseload'
+    ]
+
     def __init__(self, config_path: Optional[str] = None,
-                 output_dir: Optional[str] = None):
+                 output_dir: Optional[str] = None,
+                 run_quality_checks: bool = True):
         """
         Initialise SQL Server connection and output directory.
 
         Args:
             config_path: Path to config.ini file (optional, auto-detected if None)
             output_dir: Directory to save CSV files (defaults to data/)
+            run_quality_checks: Whether to run data quality checks (default: True)
         """
         self.sql_conn = SQLServerConnection(config_path)
         self.conn = self.sql_conn.connect()
+        self.run_quality_checks = run_quality_checks
 
         if not self.conn:
             raise ConnectionError("Failed to connect to the SQL Server database.")
@@ -248,11 +268,281 @@ class DemandDataExtractor:
         return [
             col.lower()
             .replace(" ", "_")
-            .replace("<", "under_")
-            .replace(">", "over_")
+            .replace("<", "under")
+            .replace(">", "over")
             .replace("+", "plus")
             for col in columns
         ]
+
+    def _check_schema(self, df: pd.DataFrame) -> Tuple[bool, List[str]]:
+        """
+        Check if DataFrame has expected columns.
+
+        Args:
+            df: DataFrame to check
+
+        Returns:
+            Tuple of (is_valid, list of issues)
+        """
+        issues = []
+
+        # Check for missing columns
+        missing_cols = set(self.EXPECTED_COLUMNS) - set(df.columns)
+        if missing_cols:
+            issues.append(f"Missing columns: {', '.join(sorted(missing_cols))}")
+
+        # Check for unexpected columns
+        unexpected_cols = set(df.columns) - set(self.EXPECTED_COLUMNS)
+        if unexpected_cols:
+            issues.append(f"Unexpected columns: {', '.join(sorted(unexpected_cols))}")
+
+        return len(issues) == 0, issues
+
+    def _check_data_completeness(self, df: pd.DataFrame) -> Tuple[bool, List[str]]:
+        """
+        Check for missing values in critical columns.
+
+        Args:
+            df: DataFrame to check
+
+        Returns:
+            Tuple of (is_valid, list of issues)
+        """
+        issues = []
+
+        # Critical columns that should not have nulls
+        critical_cols = ['providercodecurrent', 'periodend', 'service_line']
+
+        for col in critical_cols:
+            if col in df.columns:
+                null_count = df[col].isnull().sum()
+                null_pct = (null_count / len(df)) * 100
+
+                if null_count > 0:
+                    issues.append(
+                        f"{col}: {null_count:,} missing values ({null_pct:.1f}%)"
+                    )
+
+        # Check for completely null rows
+        completely_null = df.isnull().all(axis=1).sum()
+        if completely_null > 0:
+            issues.append(f"Found {completely_null:,} completely empty rows")
+
+        return len(issues) == 0, issues
+
+    def _check_data_types(self, df: pd.DataFrame) -> Tuple[bool, List[str]]:
+        """
+        Check if data types are appropriate.
+
+        Args:
+            df: DataFrame to check
+
+        Returns:
+            Tuple of (is_valid, list of issues)
+        """
+        issues = []
+
+        # Check periodend is datetime
+        if 'periodend' in df.columns and not pd.api.types.is_datetime64_any_dtype(df['periodend']):
+            issues.append("periodend column is not datetime type")
+
+        # Check numeric columns
+        numeric_cols = [
+            'referrals', 'clockstopactuals', 'waiters', 'caseload', 'totalcontacts', 'ftfcontacts']
+
+        for col in numeric_cols:
+            if col in df.columns and not pd.api.types.is_numeric_dtype(df[col]):
+                issues.append(f"{col} is not numeric type (found: {df[col].dtype})")
+
+        return len(issues) == 0, issues
+
+    def _check_data_ranges(self, df: pd.DataFrame) -> Tuple[bool, List[str]]:
+        """
+        Check if numeric values are within reasonable ranges.
+
+        Args:
+            df: DataFrame to check
+
+        Returns:
+            Tuple of (is_valid, list of issues)
+        """
+        issues = []
+
+        # Count columns should not be negative
+        count_cols = [
+            'referrals', 'clockstopactuals', 'waiters', 'caseload',
+            'totalcontacts', 'ftfcontacts', 'dischargesnoclockstop',
+            'dischargesfromcaseload'
+        ]
+
+        for col in count_cols:
+            if col in df.columns:
+                negative_count = (df[col] < 0).sum()
+                if negative_count > 0:
+                    issues.append(
+                        f"{col}: {negative_count:,} negative values found"
+                    )
+
+        return len(issues) == 0, issues
+
+    def _check_logical_consistency(self, df: pd.DataFrame) -> Tuple[bool, List[str]]:
+        """
+        Check logical relationships between columns.
+
+        Args:
+            df: DataFrame to check
+
+        Returns:
+            Tuple of (is_valid, list of issues)
+        """
+        issues = []
+
+        # Total waiters should equal under18 + 18plus waiters
+        if all(col in df.columns for col in ['waiters', 'waitersunder18weeks', 'waiters18plusweeks']):
+            mismatch = df[
+                (df['waiters'].notna()) &
+                (df['waitersunder18weeks'].notna()) &
+                (df['waiters18plusweeks'].notna()) &
+                (abs(df['waiters'] - (df['waitersunder18weeks'] + df['waiters18plusweeks'])) > 0.1)
+                ]
+
+            if len(mismatch) > 0:
+                issues.append(
+                    f"Waiter calculation mismatch: {len(mismatch):,} rows where "
+                    f"waiters ≠ waitersunder18weeks + waiters18plusweeks"
+                )
+
+        # FTF contacts should not exceed total contacts
+        if 'ftfcontacts' in df.columns and 'totalcontacts' in df.columns:
+            invalid = (df['ftfcontacts'] > df['totalcontacts']).sum()
+            if invalid > 0:
+                issues.append(
+                    f"FTF contacts exceed total contacts in {invalid:,} rows"
+                )
+
+        # FTF caseload contacts should not exceed total caseload contacts
+        if 'ftfcaseloadcontacts' in df.columns and 'totalcaseloadcontacts' in df.columns:
+            invalid = (df['ftfcaseloadcontacts'] > df['totalcaseloadcontacts']).sum()
+            if invalid > 0:
+                issues.append(
+                    f"FTF caseload contacts exceed total caseload contacts in {invalid:,} rows"
+                )
+
+        return len(issues) == 0, issues
+
+    def _check_duplicates(self, df: pd.DataFrame) -> Tuple[bool, List[str]]:
+        """
+        Check for duplicate records.
+
+        Args:
+            df: DataFrame to check
+
+        Returns:
+            Tuple of (is_valid, list of issues)
+        """
+        issues = []
+
+        # Check for duplicate combinations of provider, service_line, and period
+        key_cols = ['providercodecurrent', 'service_line', 'periodend']
+
+        if all(col in df.columns for col in key_cols):
+            duplicates = df.duplicated(subset=key_cols, keep=False).sum()
+            if duplicates > 0:
+                issues.append(
+                    f"Found {duplicates:,} duplicate rows based on "
+                    f"{', '.join(key_cols)}"
+                )
+
+        return len(issues) == 0, issues
+
+    def _check_date_continuity(self, df: pd.DataFrame) -> Tuple[bool, List[str]]:
+        """
+        Check for gaps in time series data.
+
+        Args:
+            df: DataFrame to check
+
+        Returns:
+            Tuple of (is_valid, list of issues)
+        """
+        issues = []
+
+        if 'periodend' not in df.columns:
+            return True, issues
+
+        # Get unique periods sorted
+        periods = df['periodend'].dropna().sort_values().unique()
+
+        if len(periods) < 2:
+            return True, issues
+
+        # Check for large gaps (more than 60 days suggests missing months)
+        period_series = pd.Series(periods)
+        gaps = period_series.diff()
+        large_gaps = gaps[gaps > pd.Timedelta(days=60)]
+
+        if len(large_gaps) > 0:
+            issues.append(
+                f"Found {len(large_gaps)} large gap(s) in time series "
+                f"(> 60 days between periods)"
+            )
+
+        return len(issues) == 0, issues
+
+    def run_data_quality_checks(self, df: pd.DataFrame) -> Dict[str, any]:
+        """
+        Run all data quality checks and return results.
+
+        Args:
+            df: DataFrame to check
+
+        Returns:
+            Dictionary with check results
+        """
+        logger.info("🔍 Running data quality checks...")
+
+        checks = {
+            'Schema Validation': self._check_schema,
+            'Data Completeness': self._check_data_completeness,
+            'Data Types': self._check_data_types,
+            'Data Ranges': self._check_data_ranges,
+            'Logical Consistency': self._check_logical_consistency,
+            'Duplicate Detection': self._check_duplicates,
+            'Date Continuity': self._check_date_continuity
+        }
+
+        results = {
+            'passed': [],
+            'failed': [],
+            'issues': {}
+        }
+
+        for check_name, check_func in checks.items():
+            is_valid, issues = check_func(df)
+
+            if is_valid:
+                results['passed'].append(check_name)
+                logger.info(f"  ✅ {check_name}: PASSED")
+            else:
+                results['failed'].append(check_name)
+                results['issues'][check_name] = issues
+                logger.warning(f"  ⚠️ {check_name}: FAILED")
+                for issue in issues:
+                    logger.warning(f"     - {issue}")
+
+        # Summary
+        total_checks = len(checks)
+        passed_checks = len(results['passed'])
+        failed_checks = len(results['failed'])
+
+        logger.info(f"\n📊 Quality Check Summary: {passed_checks}/{total_checks} passed")
+
+        if failed_checks > 0:
+            logger.warning(f"⚠️ {failed_checks} check(s) failed - review issues above")
+        else:
+            logger.info("✅ All data quality checks passed!")
+
+        return results
 
     def extract_demand_data(self) -> pd.DataFrame:
         """
@@ -263,6 +553,7 @@ class DemandDataExtractor:
 
         Raises:
             Exception: If data extraction fails
+            DataQualityException: If quality checks fail
         """
         logger.info("📊 Fetching demand data from SQL Server...")
 
@@ -298,6 +589,19 @@ class DemandDataExtractor:
 
             logger.info(f"✅ Retrieved {len(df):,} rows from source views.")
             logger.info(f"📊 Columns: {', '.join(df.columns[:5])}... ({len(df.columns)} total)")
+
+            # Run data quality checks
+            if self.run_quality_checks:
+                quality_results = self.run_data_quality_checks(df)
+
+                # Optionally raise exception if critical checks fail
+                critical_checks = ['Schema Validation', 'Data Types']
+                failed_critical = [c for c in critical_checks if c in quality_results['failed']]
+
+                if failed_critical:
+                    raise DataQualityException(
+                        f"Critical data quality checks failed: {', '.join(failed_critical)}"
+                    )
 
             return df
 
@@ -401,5 +705,8 @@ if __name__ == "__main__":
                 logger.info("🎉 Demand data extraction completed successfully!")
                 logger.info(f"📂 File saved: {output_file}")
 
+    except DataQualityException as e:
+        logger.error(f"❌ Data quality validation failed: {e}")
+        logger.error("⚠️ Data was not saved due to quality issues")
     except Exception:
         logger.exception("❌ Error occurred during demand data extraction")
