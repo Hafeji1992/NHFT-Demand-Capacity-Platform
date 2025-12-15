@@ -1,0 +1,103 @@
+# ==========================================
+# Python
+# ==========================================
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+
+# Virtual environments
+venv/
+env/
+.venv/
+
+# Jupyter notebooks checkpoints
+.ipynb_checkpoints/
+
+# ==========================================
+# Environment / Sensitive Files
+# ==========================================
+config.ini
+*.env
+.env.*
+secrets/
+credentials/
+
+# Prevent accidental storage of local data extracts
+data/
+*.csv
+*.xlsx
+*.parquet
+*.json
+
+# ==========================================
+# Logs & cache
+# ==========================================
+*.log
+logs/
+*.pid
+cache/
+*.cache
+
+# ==========================================
+# Compiled / Distribution
+# ==========================================
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# ==========================================
+# IDE / Editor files
+# ==========================================
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ==========================================
+# Dash / Plotly Artifacts
+# ==========================================
+*.map
+*.hot-update.json
+
+# ==========================================
+# OS Files
+# ==========================================
+.DS_Store
+Thumbs.db
+
+
+# ============================
+# Idea / Editor settings
+# ============================
+# Ignore all of .idea folder by default
+.idea/*
+
+# Allow some project-specific settings
+!.idea/codeStyles/
+!.idea/deployment.xml
+!.idea/modules.xml
+!.idea/vcs.xml
+!.idea/workspace.xml
+
+# Ignore user-specific or OS-specific settings
+.idea/workspace.xml
+.idea/tasks.xml
+.idea/dictionaries
+.idea/libraries
+.idea/assetWizardSettings.xml
+.idea/jsLibraryMappings.xml
+.idea/shelf
+
+# Ignore IDE caches
+.idea/dataSources/
+.idea/dataSources.ids
+.idea/dataSources.local.xml
+.idea/sqlDataSources.xml
+.idea/dynamic.xml
+.idea/uiDesigner.xml
+.idea/httpRequests
+.idea/inspectionProfiles
+.idea/runConfigurations/
