@@ -19,15 +19,15 @@ class DataQualityException(Exception):
     pass
 
 
-class DemandDataExtractor:
-    """Extracts demand data from SQL Server and saves to CSV."""
+class PatientDataExtractor:
+    """Extracts patient data from SQL Server and saves to CSV."""
 
     # SQL query as class constant for better maintainability
-    DEMAND_QUERY = """
+    PATIENT_QUERY = """
         -- ============================================================================
-        -- DEMAND DATA EXTRACTION QUERY
+        -- PATIENT DATA EXTRACTION QUERY
         -- ============================================================================
-        -- Purpose: Extract demand-related metrics from waiting times and
+        -- Purpose: Extract Patient-related metrics from waiting times and
         -- contact attendance views, pulling referrals, contacts, waiters, caseload,
         -- discharge, and treatment metrics.
         -- ============================================================================
@@ -544,9 +544,9 @@ class DemandDataExtractor:
 
         return results
 
-    def extract_demand_data(self) -> pd.DataFrame:
+    def extract_patient_data(self) -> pd.DataFrame:
         """
-        Extract demand data from SQL Server views.
+        Extract patient data from SQL Server views.
 
         Returns:
             pandas.DataFrame: The extracted data
@@ -555,11 +555,11 @@ class DemandDataExtractor:
             Exception: If data extraction fails
             DataQualityException: If quality checks fail
         """
-        logger.info("📊 Fetching demand data from SQL Server...")
+        logger.info("📊 Fetching patient data from SQL Server...")
 
         try:
             cursor = self.conn.cursor()
-            cursor.execute(self.DEMAND_QUERY)
+            cursor.execute(self.PATIENT_QUERY)
 
             # Fetch all rows
             logger.info("⏳ Fetching rows...")
@@ -612,13 +612,13 @@ class DemandDataExtractor:
             if 'cursor' in locals():
                 cursor.close()
 
-    def save_to_csv(self, df: pd.DataFrame, filename: str = "demand_data.csv") -> Path:
+    def save_to_csv(self, df: pd.DataFrame, filename: str = "patient_data.csv") -> Path:
         """
         Save DataFrame to CSV file.
 
         Args:
             df: pandas DataFrame to save
-            filename: Name of the CSV file (default: demand_data.csv)
+            filename: Name of the CSV file (default: patient_data.csv)
 
         Returns:
             Path: Path to the saved CSV file
@@ -661,28 +661,28 @@ class DemandDataExtractor:
         self.close_connection()
 
 
-def load_demand_data(csv_path: Optional[str] = None) -> pd.DataFrame:
+def load_patient_data(csv_path: Optional[str] = None) -> pd.DataFrame:
     """
-    Utility function to load demand data from CSV.
+    Utility function to load patient data from CSV.
 
     Args:
-        csv_path: Path to CSV file. If None, loads demand_data.csv
+        csv_path: Path to CSV file. If None, loads patient_data.csv
                   from default location.
 
     Returns:
-        pandas.DataFrame: The demand data
+        pandas.DataFrame: The patient data
 
     Raises:
         FileNotFoundError: If the CSV file doesn't exist
     """
     if csv_path is None:
         project_root = Path(__file__).resolve().parents[2]
-        csv_path = project_root / "data" / "demand_data.csv"
+        csv_path = project_root / "data" / "patient_data.csv"
     else:
         csv_path = Path(csv_path)
 
     if not csv_path.exists():
-        raise FileNotFoundError(f"Demand data file not found at: {csv_path}")
+        raise FileNotFoundError(f"Patient data file not found at: {csv_path}")
 
     logger.info(f"📂 Loading data from: {csv_path}")
     df = pd.read_csv(csv_path, parse_dates=["periodend"])
@@ -694,19 +694,19 @@ def load_demand_data(csv_path: Optional[str] = None) -> pd.DataFrame:
 if __name__ == "__main__":
     # Use context manager for automatic connection cleanup
     try:
-        with DemandDataExtractor() as extractor:
+        with PatientDataExtractor() as extractor:
             # Extract data from SQL Server
-            df = extractor.extract_demand_data()
+            df = extractor.extract_patient_data()
 
-            # Save as demand_data.csv
+            # Save as patient_data.csv
             output_file = extractor.save_to_csv(df)
 
             if output_file:
-                logger.info("🎉 Demand data extraction completed successfully!")
+                logger.info("🎉 Patient data extraction completed successfully!")
                 logger.info(f"📂 File saved: {output_file}")
 
     except DataQualityException as e:
         logger.error(f"❌ Data quality validation failed: {e}")
         logger.error("⚠️ Data was not saved due to quality issues")
     except Exception:
-        logger.exception("❌ Error occurred during demand data extraction")
+        logger.exception("❌ Error occurred during patient data extraction")

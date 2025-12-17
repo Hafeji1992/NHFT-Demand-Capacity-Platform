@@ -1,8 +1,8 @@
-# Demand Modelling Data Dictionary
+# Patient Data Dictionary
 
 ## Dataset Overview
 
-- **Dataset name:** Demand Modelling Dataset
+- **Dataset name:** Patient Dataset
 - **System owner:** Northamptonshire Healthcare NHS Foundation Trust (NHFT)
 - **Data controller:** NHFT
 - **Purpose:**  
@@ -14,7 +14,7 @@
   - MIS_AG.dbo.Vw_tbl_ag_Report_ContactAttendances
   - MIS_Config.dbo.tbl_org_current_RL9_Service_Line
 - **Refresh cadence:** Monthly (aligned to MIS reporting refresh).
-- **Storage location:** `data/demand_data.csv` (excluded from version control).
+- **Storage location:** `data/patient_data.csv` (excluded from version control).
 - **Sensitivity classification:**  
   Aggregated operational activity data. No direct patient identifiers. Managed under NHFT Information Governance standards.
 
@@ -72,9 +72,9 @@
 
 ## Change Log
 
-| Date       | Change | Author |
-|------------|-------|--------|
-| 2025-12-17 | Initial creation of demand data dictionary | Yahya Hafeji |
+| Date       | Change                                      | Author |
+|------------|---------------------------------------------|--------|
+| 2025-12-17 | Initial creation of patient data dictionary | Yahya Hafeji |
 
 ---
 

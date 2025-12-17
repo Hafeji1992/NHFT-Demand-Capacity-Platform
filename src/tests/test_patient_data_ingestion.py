@@ -7,7 +7,7 @@ import pytest
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.append(str(PROJECT_ROOT / "src"))
 
-from data_engineering.demand_data_ingestion import DemandDataExtractor, load_demand_data, DataQualityException
+from data_engineering.patient_data_ingestion import PatientDataExtractor, load_patient_data, DataQualityException
 
 
 # ---------------------------------------------------------------------
@@ -80,7 +80,7 @@ class FakeSQLServerConnection:
 # ---------------------------------------------------------------------
 def test_normalise_column_names():
     cols = ["Waiters<18Weeks", "Waiters18+Weeks", "Service Line", "FTFContacts"]
-    normalised = DemandDataExtractor._normalise_column_names(cols)
+    normalised = PatientDataExtractor._normalise_column_names(cols)
 
     assert normalised == [
         "waitersunder18weeks",
@@ -90,9 +90,9 @@ def test_normalise_column_names():
     ]
 
 
-def test_extract_demand_data_with_mocked_db(monkeypatch):
+def test_extract_patient_data_with_mocked_db(monkeypatch):
     """
-    Ensures extract_demand_data:
+    Ensures extract_patient_data:
     - executes the query
     - returns a DataFrame
     - normalises column names
@@ -100,12 +100,12 @@ def test_extract_demand_data_with_mocked_db(monkeypatch):
     """
     # Patch SQLServerConnection inside the module scope by replacing the class it uses
     monkeypatch.setattr(
-        "data_engineering.demand_data_ingestion.SQLServerConnection",
+        "data_engineering.patient_data_ingestion.SQLServerConnection",
         FakeSQLServerConnection
     )
 
-    extractor = DemandDataExtractor(run_quality_checks=False)
-    df = extractor.extract_demand_data()
+    extractor = PatientDataExtractor(run_quality_checks=False)
+    df = extractor.extract_patient_data()
 
     assert isinstance(df, pd.DataFrame)
     assert len(df) == 1
@@ -121,30 +121,30 @@ def test_quality_checks_fail_on_schema(monkeypatch):
     If Schema Validation fails and it is treated as critical, the extractor should raise DataQualityException.
     """
     monkeypatch.setattr(
-        "data_engineering.demand_data_ingestion.SQLServerConnection",
+        "data_engineering.patient_data_ingestion.SQLServerConnection",
         FakeSQLServerConnection
     )
 
-    extractor = DemandDataExtractor(run_quality_checks=True)
+    extractor = PatientDataExtractor(run_quality_checks=True)
 
     # Force schema check to fail by removing an expected column after extraction
-    df = extractor.extract_demand_data()
+    df = extractor.extract_patient_data()
     df = df.drop(columns=["referrals"])
 
     # Run checks directly and confirm schema fails
     results = extractor.run_data_quality_checks(df)
     assert "Schema Validation" in results["failed"]
 
-    # Simulate the same critical-fail behaviour by calling _check_schema and raising like extract_demand_data does
+    # Simulate the same critical-fail behaviour by calling _check_schema and raising like extract_patient_data does
     is_valid, _issues = extractor._check_schema(df)
     assert is_valid is False
 
 
-def test_load_demand_data_reads_csv(tmp_path, monkeypatch):
+def test_load_patient_data_reads_csv(tmp_path, monkeypatch):
     """
-    load_demand_data() should load a CSV and parse periodend as datetime.
+    load_patient_data() should load a CSV and parse periodend as datetime.
     """
-    test_file = tmp_path / "demand_data.csv"
+    test_file = tmp_path / "patient_data.csv"
 
     df_in = pd.DataFrame({
         "periodend": ["2025-01-31", "2025-02-28"],
@@ -163,14 +163,14 @@ def test_load_demand_data_reads_csv(tmp_path, monkeypatch):
     })
     df_in.to_csv(test_file, index=False)
 
-    df_out = load_demand_data(str(test_file))
+    df_out = load_patient_data(str(test_file))
 
     assert len(df_out) == 2
     assert pd.api.types.is_datetime64_any_dtype(df_out["periodend"])
     assert df_out["referrals"].sum() == 30
 
 
-def test_load_demand_data_missing_file_raises(tmp_path):
+def test_load_patient_data_missing_file_raises(tmp_path):
     missing = tmp_path / "does_not_exist.csv"
     with pytest.raises(FileNotFoundError):
-        load_demand_data(str(missing))
+        load_patient_data(str(missing))

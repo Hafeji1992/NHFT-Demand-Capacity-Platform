@@ -8,7 +8,7 @@ import sys
 # Add parent directory to path to import from data_engineering
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from data_engineering.demand_data_ingestion import load_demand_data
+from data_engineering.patient_data_ingestion import load_patient_data
 
 # Configure logging
 logging.basicConfig(
@@ -18,19 +18,19 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-class DemandSummaryStatistics:
-    """Generate comprehensive summary statistics from demand data."""
+class PatientSummaryStatistics:
+    """Generate comprehensive summary statistics from patient data."""
 
     def __init__(self):
         """Initialise summary statistics generator."""
-        logger.info("📊 Initialising Demand Summary Statistics")
+        logger.info("📊 Initialising Patient Summary Statistics")
 
     def generate_summary_statistics(self, df: pd.DataFrame) -> Dict[str, Any]:
         """
-        Generate comprehensive summary statistics from the demand data.
+        Generate comprehensive summary statistics from the patient data.
 
         Args:
-            df: pandas DataFrame with demand data
+            df: pandas DataFrame with patient data
 
         Returns:
             Dictionary containing all summary statistics
@@ -69,7 +69,7 @@ class DemandSummaryStatistics:
                 'total_clock_stops': int(df['clockstopactuals'].sum()),
                 'total_waiters': int(df['waiters'].sum()),
                 'waiters_18plus': int(df['waiters18plusweeks'].sum()),
-                'waiters_under_18': int(df['waitersunder_18weeks'].sum()),
+                'waiters_under_18': int(df['waitersunder18weeks'].sum()),
                 'total_caseload': int(df['caseload'].sum()),
                 'total_contacts': int(df['totalcontacts'].sum()),
                 'ftf_contacts': int(df['ftfcontacts'].sum()),
@@ -93,7 +93,7 @@ class DemandSummaryStatistics:
         Generate breakdown by service line.
 
         Args:
-            df: pandas DataFrame with demand data
+            df: pandas DataFrame with patient data
 
         Returns:
             Service line breakdown DataFrame
@@ -127,7 +127,7 @@ class DemandSummaryStatistics:
         Generate breakdown by provider.
 
         Args:
-            df: pandas DataFrame with demand data
+            df: pandas DataFrame with patient data
 
         Returns:
             Provider breakdown DataFrame
@@ -161,7 +161,7 @@ class DemandSummaryStatistics:
         Generate time series summary by period.
 
         Args:
-            df: pandas DataFrame with demand data
+            df: pandas DataFrame with patient data
 
         Returns:
             Time series summary DataFrame
@@ -200,7 +200,7 @@ class DemandSummaryStatistics:
         """
         lines = []
         lines.append("=" * 80)
-        lines.append("DEMAND DATA SUMMARY STATISTICS")
+        lines.append("PATIENT DATA SUMMARY STATISTICS")
         lines.append("=" * 80)
         lines.append("")
 
@@ -250,7 +250,7 @@ class DemandSummaryStatistics:
         Generate all summary statistics.
 
         Args:
-            df: pandas DataFrame with demand data
+            df: pandas DataFrame with patient data
             print_summary: Whether to print summary to console
 
         Returns:
@@ -272,12 +272,12 @@ class DemandSummaryStatistics:
 def main():
     """Main execution function."""
     try:
-        # Load the demand data
-        logger.info("📂 Loading demand data...")
-        df = load_demand_data()
+        # Load the patient data
+        logger.info("📂 Loading patient data...")
+        df = load_patient_data()
 
         # Initialise summary statistics generator
-        stats = DemandSummaryStatistics()
+        stats = PatientSummaryStatistics()
 
         # Generate all statistics
         summary, service_breakdown, provider_breakdown, time_series = stats.generate_all_statistics(
@@ -308,7 +308,7 @@ def main():
 
     except FileNotFoundError as e:
         logger.error(f"❌ Data file not found: {e}")
-        logger.info("💡 Please run demand_data_ingestion.py first to generate the data file.")
+        logger.info("💡 Please run patient_data_ingestion.py first to generate the data file.")
     except ValueError as e:
         logger.error(f"❌ Data validation error: {e}")
     except Exception:
