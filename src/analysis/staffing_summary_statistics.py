@@ -8,7 +8,8 @@ import sys
 # Ensure src is on the path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from data_engineering.patient_data_ingestion import load_patient_data
+from data_engineering.staffing_data_ingestion import load_staffing_data
+
 
 # ---------------------------------------------------------------------
 # Logging
@@ -19,28 +20,29 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
 # ---------------------------------------------------------------------
-# Patient Summary Statistics
+# Staffing Summary Statistics
 # ---------------------------------------------------------------------
-class PatientSummaryStatistics:
-    """Generate comprehensive summary statistics from patient data."""
+class StaffingSummaryStatistics:
+    """Generate comprehensive summary statistics from staffing (capacity) data."""
 
     # -----------------------------------------------------------------
     # Initialisation
     # -----------------------------------------------------------------
     def __init__(self):
         """Initialise summary statistics generator."""
-        logger.info("📊 Initialising Patient Summary Statistics")
+        logger.info("📊 Initialising Staffing Summary Statistics")
 
     # -----------------------------------------------------------------
     # Global Summary
     # -----------------------------------------------------------------
     def generate_summary_statistics(self, df: pd.DataFrame) -> Dict[str, Any]:
         """
-        Generate comprehensive summary statistics from the patient data.
+        Generate comprehensive summary statistics from the staffing data.
 
         Args:
-            df: pandas DataFrame with patient data
+            df: pandas DataFrame with staffing data
 
         Returns:
             Dictionary containing all summary statistics
@@ -57,42 +59,33 @@ class PatientSummaryStatistics:
         logger.info(f"Available columns: {', '.join(df.columns)}")
 
         # Verify required columns exist
-        required_cols = ['periodend', 'service_line', 'providercodecurrent']
+        required_cols = [
+            "providercodecurrent",
+            "service_line",
+            "staff_group",
+            "staff",
+        ]
         missing_cols = [col for col in required_cols if col not in df.columns]
         if missing_cols:
             raise ValueError(f"Missing required columns: {missing_cols}")
 
         summary = {
-            'generation_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            'total_records': len(df),
-            'date_range': {
-                'start': df['periodend'].min(),
-                'end': df['periodend'].max(),
-                'months': df['periodend'].nunique()
+            "generation_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "total_records": len(df),
+            "dimensions": {
+                "providers": df["providercodecurrent"].nunique(),
+                "service_lines": df["service_line"].nunique(),
+                "staff_groups": df["staff_group"].nunique(),
             },
-            'dimensions': {
-                'service_lines': df['service_line'].nunique(),
-                'providers': df['providercodecurrent'].nunique()
+            "key_metrics": {
+                "total_staff": int(df["staff"].sum()),
+                "average_staff_per_service": float(
+                    df.groupby(["providercodecurrent", "service_line"])["staff"].sum().mean()
+                ),
+                "median_staff_per_service": float(
+                    df.groupby(["providercodecurrent", "service_line"])["staff"].sum().median()
+                ),
             },
-            'key_metrics': {
-                'total_referrals': int(df['referrals'].sum()),
-                'total_clock_stops': int(df['clockstopactuals'].sum()),
-                'total_waiters': int(df['waiters'].sum()),
-                'waiters_18plus': int(df['waiters18plusweeks'].sum()),
-                'waiters_under_18': int(df['waitersunder18weeks'].sum()),
-                'total_caseload': int(df['caseload'].sum()),
-                'total_contacts': int(df['totalcontacts'].sum()),
-                'ftf_contacts': int(df['ftfcontacts'].sum()),
-                'discharges_with_clock_stop': int(df['dischargesfromcaseload'].sum()),
-                'discharges_no_clock_stop': int(df['dischargesnoclockstop'].sum())
-            },
-            'average_metrics': {
-                'avg_length_of_treatment': float(df['averagelengthoftreatment'].mean()),
-                'avg_contacts_at_discharge': float(df['averagecontactsatdischarge'].mean()),
-                'avg_ftf_contacts_at_discharge': float(df['averageftfcontactsatdischarge'].mean()),
-                'avg_referral_clock_stop_ratio': float(df['referralclockstopratio'].mean()),
-                'avg_contacts_per_caseload': float(df['totalcontactspercaseload'].mean())
-            }
         }
 
         logger.info("✅ Summary statistics generated.")
@@ -106,72 +99,55 @@ class PatientSummaryStatistics:
         Generate breakdown by service line.
 
         Args:
-            df: pandas DataFrame with patient data
+            df: pandas DataFrame with staffing data
 
         Returns:
             Service line breakdown DataFrame
         """
         logger.info("📋 Generating service line breakdown...")
 
-        agg_dict = {
-            'referrals': 'sum',
-            'clockstopactuals': 'sum',
-            'waiters': 'sum',
-            'waiters18plusweeks': 'sum',
-            'caseload': 'sum',
-            'totalcontacts': 'sum',
-            'ftfcontacts': 'sum',
-            'averagelengthoftreatment': 'mean',
-            'averagecontactsatdischarge': 'mean'
-        }
-
-        service_breakdown = (
-            df.groupby('service_line', dropna=False)
-            .agg(agg_dict)
-            .round(2)
-            .sort_values('referrals', ascending=False)
+        breakdown = (
+            df.groupby("service_line", dropna=False)
+            .agg(
+                total_staff=("staff", "sum"),
+                staff_groups=("staff_group", "nunique"),
+            )
+            .sort_values("total_staff", ascending=False)
         )
 
-        logger.info(f"✅ Breakdown generated for {len(service_breakdown)} service lines.")
-        return service_breakdown
+        logger.info(f"✅ Breakdown generated for {len(breakdown)} service lines.")
+        return breakdown
 
     # -----------------------------------------------------------------
-    # Time Series Summary
+    # Staff Group Breakdown
     # -----------------------------------------------------------------
-    def generate_time_series_summary(self, df: pd.DataFrame) -> pd.DataFrame:
+    def generate_staff_group_breakdown(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Generate time series summary by period.
+        Generate breakdown by staff group.
 
         Args:
-            df: pandas DataFrame with patient data
+            df: pandas DataFrame with staffing data
 
         Returns:
-            Time series summary DataFrame
+            Staff group breakdown DataFrame
         """
-        logger.info("📈 Generating time series summary...")
+        logger.info("📋 Generating staff group breakdown...")
 
-        agg_dict = {
-            'referrals': 'sum',
-            'clockstopactuals': 'sum',
-            'waiters': 'sum',
-            'waiters18plusweeks': 'sum',
-            'caseload': 'sum',
-            'totalcontacts': 'sum',
-            'ftfcontacts': 'sum'
-        }
-
-        time_series = (
-            df.groupby('periodend')
-            .agg(agg_dict)
-            .round(2)
-            .sort_index()
+        breakdown = (
+            df.groupby("staff_group", dropna=False)
+            .agg(
+                total_staff=("staff", "sum"),
+                providers=("providercodecurrent", "nunique"),
+                service_lines=("service_line", "nunique"),
+            )
+            .sort_values("total_staff", ascending=False)
         )
 
-        logger.info(f"✅ Time series generated for {len(time_series)} periods.")
-        return time_series
+        logger.info(f"✅ Breakdown generated for {len(breakdown)} staff groups.")
+        return breakdown
 
     # -----------------------------------------------------------------
-    # Format Helpers
+    # Formatting Helpers
     # -----------------------------------------------------------------
     def _format_summary_text(self, summary: Dict[str, Any]) -> str:
         """
@@ -185,7 +161,7 @@ class PatientSummaryStatistics:
         """
         lines = []
         lines.append("=" * 80)
-        lines.append("PATIENT DATA SUMMARY STATISTICS")
+        lines.append("STAFFING DATA SUMMARY STATISTICS")
         lines.append("=" * 80)
         lines.append("")
 
@@ -195,22 +171,22 @@ class PatientSummaryStatistics:
         lines.append("DATASET OVERVIEW")
         lines.append("-" * 80)
         lines.append(f"Total Records: {summary['total_records']:,}")
-        lines.append(f"Date Range: {summary['date_range']['start']} to {summary['date_range']['end']}")
-        lines.append(f"Number of Months: {summary['date_range']['months']}")
-        lines.append(f"Service Lines: {summary['dimensions']['service_lines']}")
         lines.append(f"Providers: {summary['dimensions']['providers']}")
+        lines.append(f"Service Lines: {summary['dimensions']['service_lines']}")
+        lines.append(f"Staff Groups: {summary['dimensions']['staff_groups']}")
         lines.append("")
 
-        lines.append("KEY METRICS (TOTALS)")
+        lines.append("KEY METRICS")
         lines.append("-" * 80)
-        for metric, value in summary['key_metrics'].items():
-            lines.append(f"{metric.replace('_', ' ').title()}: {value:,}")
-
-        lines.append("")
-        lines.append("AVERAGE METRICS")
-        lines.append("-" * 80)
-        for metric, value in summary['average_metrics'].items():
-            lines.append(f"{metric.replace('_', ' ').title()}: {value:.2f}")
+        lines.append(f"Total Staff: {summary['key_metrics']['total_staff']:,}")
+        lines.append(
+            f"Average Staff Per Service: "
+            f"{summary['key_metrics']['average_staff_per_service']:.2f}"
+        )
+        lines.append(
+            f"Median Staff Per Service: "
+            f"{summary['key_metrics']['median_staff_per_service']:.2f}"
+        )
 
         lines.append("")
         lines.append("=" * 80)
@@ -235,52 +211,52 @@ class PatientSummaryStatistics:
     def generate_all_statistics(
             self,
             df: pd.DataFrame,
-            print_summary: bool = True
-    ) -> Tuple[Dict[str, Any], pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+            print_summary: bool = True,
+    ) -> Tuple[Dict[str, Any], pd.DataFrame, pd.DataFrame]:
         """
         Generate all summary statistics.
 
         Args:
-            df: pandas DataFrame with patient data
+            df: pandas DataFrame with staffing data
             print_summary: Whether to print summary to console
 
         Returns:
-            Tuple containing (summary_dict, service_breakdown, provider_breakdown, time_series)
+            Tuple containing (summary_dict, service_breakdown, staff_group_breakdown)
         """
         # Generate all statistics
         summary = self.generate_summary_statistics(df)
         service_breakdown = self.generate_service_line_breakdown(df)
-        time_series = self.generate_time_series_summary(df)
+        staff_group_breakdown = self.generate_staff_group_breakdown(df)
 
         # Print to console if requested
         if print_summary:
             self.print_summary(summary)
 
-        return summary, service_breakdown, time_series
+        return summary, service_breakdown, staff_group_breakdown
+
 
 # ---------------------------------------------------------------------
-# Main Execution
+# Script Entry Point
 # ---------------------------------------------------------------------
 def main():
     """Main execution function."""
     try:
-        # Load the patient data
-        logger.info("📂 Loading patient data...")
-        df = load_patient_data()
+        # Load the staffing data
+        logger.info("📂 Loading staffing data...")
+        df = load_staffing_data()
 
         # Initialise summary statistics generator
-        stats = PatientSummaryStatistics()
+        stats = StaffingSummaryStatistics()
 
         # Generate all statistics
-        summary, service_breakdown, provider_breakdown, time_series = stats.generate_all_statistics(
+        summary, service_breakdown, staff_group_breakdown = stats.generate_all_statistics(
             df, print_summary=True
         )
 
         logger.info("🎉 Summary statistics generated successfully!")
         logger.info(f"\n📊 DataFrames available for analysis:")
         logger.info(f"  - service_breakdown: {len(service_breakdown)} rows")
-        logger.info(f"  - provider_breakdown: {len(provider_breakdown)} rows")
-        logger.info(f"  - time_series: {len(time_series)} rows")
+        logger.info(f"  - staff_group_breakdown: {len(staff_group_breakdown)} rows")
 
         # Display preview of breakdowns
         print("\n" + "=" * 80)
@@ -289,18 +265,13 @@ def main():
         print(service_breakdown.head(10))
 
         print("\n" + "=" * 80)
-        print("PROVIDER BREAKDOWN (Top 10)")
+        print("STAFF GROUP BREAKDOWN")
         print("=" * 80)
-        print(provider_breakdown.head(10))
-
-        print("\n" + "=" * 80)
-        print("TIME SERIES SUMMARY (Last 10 Periods)")
-        print("=" * 80)
-        print(time_series.tail(10))
+        print(staff_group_breakdown)
 
     except FileNotFoundError as e:
         logger.error(f"❌ Data file not found: {e}")
-        logger.info("💡 Please run patient_data_ingestion.py first to generate the data file.")
+        logger.info("💡 Please run staffing_data_ingestion.py first to generate the data file.")
     except ValueError as e:
         logger.error(f"❌ Data validation error: {e}")
     except Exception:

@@ -6,19 +6,25 @@ from tqdm import tqdm
 
 from data_engineering.connect import SQLServerConnection
 
-# Configure logging
+# ---------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
-
+# ---------------------------------------------------------------------
+# Custom Exceptions
+# ---------------------------------------------------------------------
 class DataQualityException(Exception):
     """Custom exception for data quality failures."""
     pass
 
-
+# ---------------------------------------------------------------------
+# Patient Data Extractor
+# ---------------------------------------------------------------------
 class PatientDataExtractor:
     """Extracts patient data from SQL Server and saves to CSV."""
 
@@ -225,6 +231,9 @@ class PatientDataExtractor:
         'dischargesfromcaseload'
     ]
 
+# -----------------------------------------------------------------
+# Initialisation
+# -----------------------------------------------------------------
     def __init__(self, config_path: Optional[str] = None,
                  output_dir: Optional[str] = None,
                  run_quality_checks: bool = True):
@@ -254,6 +263,9 @@ class PatientDataExtractor:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         logger.info(f"📁 Output directory: {self.output_dir}")
 
+# -----------------------------------------------------------------
+# Helper Methods
+# -----------------------------------------------------------------
     @staticmethod
     def _normalise_column_names(columns: list[str]) -> list[str]:
         """
@@ -274,6 +286,9 @@ class PatientDataExtractor:
             for col in columns
         ]
 
+# -----------------------------------------------------------------
+# Schema Validation
+# -----------------------------------------------------------------
     def _check_schema(self, df: pd.DataFrame) -> Tuple[bool, List[str]]:
         """
         Check if DataFrame has expected columns.
@@ -298,6 +313,9 @@ class PatientDataExtractor:
 
         return len(issues) == 0, issues
 
+# -----------------------------------------------------------------
+# Data Completeness Checks
+# -----------------------------------------------------------------
     def _check_data_completeness(self, df: pd.DataFrame) -> Tuple[bool, List[str]]:
         """
         Check for missing values in critical columns.
@@ -330,6 +348,9 @@ class PatientDataExtractor:
 
         return len(issues) == 0, issues
 
+# -----------------------------------------------------------------
+# Data Type Checks
+# -----------------------------------------------------------------
     def _check_data_types(self, df: pd.DataFrame) -> Tuple[bool, List[str]]:
         """
         Check if data types are appropriate.
@@ -356,6 +377,9 @@ class PatientDataExtractor:
 
         return len(issues) == 0, issues
 
+# -----------------------------------------------------------------
+# Data Range Checks
+# -----------------------------------------------------------------
     def _check_data_ranges(self, df: pd.DataFrame) -> Tuple[bool, List[str]]:
         """
         Check if numeric values are within reasonable ranges.
@@ -385,6 +409,9 @@ class PatientDataExtractor:
 
         return len(issues) == 0, issues
 
+# -----------------------------------------------------------------
+# Logical Consistency Checks
+# -----------------------------------------------------------------
     def _check_logical_consistency(self, df: pd.DataFrame) -> Tuple[bool, List[str]]:
         """
         Check logical relationships between columns.
@@ -430,6 +457,9 @@ class PatientDataExtractor:
 
         return len(issues) == 0, issues
 
+    # -----------------------------------------------------------------
+    # Duplicate Detection
+    # -----------------------------------------------------------------
     def _check_duplicates(self, df: pd.DataFrame) -> Tuple[bool, List[str]]:
         """
         Check for duplicate records.
@@ -455,6 +485,9 @@ class PatientDataExtractor:
 
         return len(issues) == 0, issues
 
+# -----------------------------------------------------------------
+# Date Continuity Check
+# -----------------------------------------------------------------
     def _check_date_continuity(self, df: pd.DataFrame) -> Tuple[bool, List[str]]:
         """
         Check for gaps in time series data.
@@ -489,6 +522,9 @@ class PatientDataExtractor:
 
         return len(issues) == 0, issues
 
+    # -----------------------------------------------------------------
+    # Data Quality Checks
+    # -----------------------------------------------------------------
     def run_data_quality_checks(self, df: pd.DataFrame) -> Dict[str, any]:
         """
         Run all data quality checks and return results.
@@ -544,6 +580,9 @@ class PatientDataExtractor:
 
         return results
 
+    # -----------------------------------------------------------------
+    # Data Extraction
+    # -----------------------------------------------------------------
     def extract_patient_data(self) -> pd.DataFrame:
         """
         Extract patient data from SQL Server views.
@@ -612,6 +651,9 @@ class PatientDataExtractor:
             if 'cursor' in locals():
                 cursor.close()
 
+    # -----------------------------------------------------------------
+    # Data Persistence
+    # -----------------------------------------------------------------
     def save_to_csv(self, df: pd.DataFrame, filename: str = "patient_data.csv") -> Path:
         """
         Save DataFrame to CSV file.
@@ -660,7 +702,9 @@ class PatientDataExtractor:
         """Context manager exit."""
         self.close_connection()
 
-
+# ---------------------------------------------------------------------
+# Utility Loader
+# ---------------------------------------------------------------------
 def load_patient_data(csv_path: Optional[str] = None) -> pd.DataFrame:
     """
     Utility function to load patient data from CSV.
@@ -690,7 +734,9 @@ def load_patient_data(csv_path: Optional[str] = None) -> pd.DataFrame:
 
     return df
 
-
+# ---------------------------------------------------------------------
+# Script Entry Point
+# ---------------------------------------------------------------------
 if __name__ == "__main__":
     # Use context manager for automatic connection cleanup
     try:
