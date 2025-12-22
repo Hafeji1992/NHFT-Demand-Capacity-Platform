@@ -3,7 +3,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-# Ensure project root is on the Python path so `data_engineering.*` imports work
+# Ensure src is on the path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.append(str(PROJECT_ROOT / "src"))
 
@@ -11,7 +11,7 @@ from data_engineering.patient_data_ingestion import PatientDataExtractor, load_p
 
 
 # ---------------------------------------------------------------------
-# Test helpers (fake DB connection/cursor)
+# Fake DB infrastructure
 # ---------------------------------------------------------------------
 class FakeCursor:
     def __init__(self, rows, columns):
@@ -28,7 +28,9 @@ class FakeCursor:
     def close(self):
         self._closed = True
 
-
+# ---------------------------------------------------------------------
+# Fake DB connection
+# ---------------------------------------------------------------------
 class FakeConnection:
     def __init__(self, rows, columns):
         self._rows = rows
@@ -37,7 +39,9 @@ class FakeConnection:
     def cursor(self):
         return FakeCursor(self._rows, self._columns)
 
-
+# ---------------------------------------------------------------------
+# Fake SQLServerConnection
+# ---------------------------------------------------------------------
 class FakeSQLServerConnection:
     """Replaces SQLServerConnection in tests."""
     def __init__(self, _config_path=None):
@@ -76,7 +80,7 @@ class FakeSQLServerConnection:
 
 
 # ---------------------------------------------------------------------
-# Unit tests
+# Unit tests - Normalise Column Names
 # ---------------------------------------------------------------------
 def test_normalise_column_names():
     cols = ["Waiters<18Weeks", "Waiters18+Weeks", "Service Line", "FTFContacts"]
@@ -89,7 +93,9 @@ def test_normalise_column_names():
         "ftfcontacts",
     ]
 
-
+# ---------------------------------------------------------------------
+# Unit tests - Extract Patient Data
+# ---------------------------------------------------------------------
 def test_extract_patient_data_with_mocked_db(monkeypatch):
     """
     Ensures extract_patient_data:
@@ -115,7 +121,9 @@ def test_extract_patient_data_with_mocked_db(monkeypatch):
     assert "waitersunder18weeks" in df.columns
     assert "waiters18plusweeks" in df.columns
 
-
+# ---------------------------------------------------------------------
+# Unit tests - Data Quality Checks
+# ---------------------------------------------------------------------
 def test_quality_checks_fail_on_schema(monkeypatch):
     """
     If Schema Validation fails and it is treated as critical, the extractor should raise DataQualityException.
@@ -139,7 +147,9 @@ def test_quality_checks_fail_on_schema(monkeypatch):
     is_valid, _issues = extractor._check_schema(df)
     assert is_valid is False
 
-
+# ---------------------------------------------------------------------
+# Unit tests - Load Patient Data from CSV
+# ---------------------------------------------------------------------
 def test_load_patient_data_reads_csv(tmp_path, monkeypatch):
     """
     load_patient_data() should load a CSV and parse periodend as datetime.
@@ -169,7 +179,9 @@ def test_load_patient_data_reads_csv(tmp_path, monkeypatch):
     assert pd.api.types.is_datetime64_any_dtype(df_out["periodend"])
     assert df_out["referrals"].sum() == 30
 
-
+# ---------------------------------------------------------------------
+# Unit tests - Load Patient Data - Missing File
+# ---------------------------------------------------------------------
 def test_load_patient_data_missing_file_raises(tmp_path):
     missing = tmp_path / "does_not_exist.csv"
     with pytest.raises(FileNotFoundError):

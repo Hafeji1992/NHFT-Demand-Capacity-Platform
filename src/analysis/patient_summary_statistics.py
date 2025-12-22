@@ -5,26 +5,36 @@ from datetime import datetime
 import pandas as pd
 import sys
 
-# Add parent directory to path to import from data_engineering
+# Ensure src is on the path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from data_engineering.patient_data_ingestion import load_patient_data
 
-# Configure logging
+# ---------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
-
+# ---------------------------------------------------------------------
+# Patient Summary Statistics
+# ---------------------------------------------------------------------
 class PatientSummaryStatistics:
     """Generate comprehensive summary statistics from patient data."""
 
+    # -----------------------------------------------------------------
+    # Initialisation
+    # -----------------------------------------------------------------
     def __init__(self):
         """Initialise summary statistics generator."""
         logger.info("📊 Initialising Patient Summary Statistics")
 
+    # -----------------------------------------------------------------
+    # Global Summary
+    # -----------------------------------------------------------------
     def generate_summary_statistics(self, df: pd.DataFrame) -> Dict[str, Any]:
         """
         Generate comprehensive summary statistics from the patient data.
@@ -88,6 +98,9 @@ class PatientSummaryStatistics:
         logger.info("✅ Summary statistics generated.")
         return summary
 
+    # -----------------------------------------------------------------
+    # Service Line Breakdown
+    # -----------------------------------------------------------------
     def generate_service_line_breakdown(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Generate breakdown by service line.
@@ -122,40 +135,9 @@ class PatientSummaryStatistics:
         logger.info(f"✅ Breakdown generated for {len(service_breakdown)} service lines.")
         return service_breakdown
 
-    def generate_provider_breakdown(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Generate breakdown by provider.
-
-        Args:
-            df: pandas DataFrame with patient data
-
-        Returns:
-            Provider breakdown DataFrame
-        """
-        logger.info("📋 Generating provider breakdown...")
-
-        agg_dict = {
-            'referrals': 'sum',
-            'clockstopactuals': 'sum',
-            'waiters': 'sum',
-            'waiters18plusweeks': 'sum',
-            'caseload': 'sum',
-            'totalcontacts': 'sum',
-            'ftfcontacts': 'sum',
-            'averagelengthoftreatment': 'mean',
-            'averagecontactsatdischarge': 'mean'
-        }
-
-        provider_breakdown = (
-            df.groupby('providercodecurrent', dropna=False)
-            .agg(agg_dict)
-            .round(2)
-            .sort_values('referrals', ascending=False)
-        )
-
-        logger.info(f"✅ Breakdown generated for {len(provider_breakdown)} providers.")
-        return provider_breakdown
-
+    # -----------------------------------------------------------------
+    # Time Series Summary
+    # -----------------------------------------------------------------
     def generate_time_series_summary(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Generate time series summary by period.
@@ -188,6 +170,9 @@ class PatientSummaryStatistics:
         logger.info(f"✅ Time series generated for {len(time_series)} periods.")
         return time_series
 
+    # -----------------------------------------------------------------
+    # Format Helpers
+    # -----------------------------------------------------------------
     def _format_summary_text(self, summary: Dict[str, Any]) -> str:
         """
         Format summary statistics as text.
@@ -232,6 +217,9 @@ class PatientSummaryStatistics:
 
         return "\n".join(lines)
 
+    # -----------------------------------------------------------------
+    # Print Helpers
+    # -----------------------------------------------------------------
     def print_summary(self, summary: Dict[str, Any]) -> None:
         """
         Print summary statistics to console.
@@ -241,6 +229,9 @@ class PatientSummaryStatistics:
         """
         print("\n" + self._format_summary_text(summary) + "\n")
 
+    # -----------------------------------------------------------------
+    # Orchestrator
+    # -----------------------------------------------------------------
     def generate_all_statistics(
             self,
             df: pd.DataFrame,
@@ -259,16 +250,17 @@ class PatientSummaryStatistics:
         # Generate all statistics
         summary = self.generate_summary_statistics(df)
         service_breakdown = self.generate_service_line_breakdown(df)
-        provider_breakdown = self.generate_provider_breakdown(df)
         time_series = self.generate_time_series_summary(df)
 
         # Print to console if requested
         if print_summary:
             self.print_summary(summary)
 
-        return summary, service_breakdown, provider_breakdown, time_series
+        return summary, service_breakdown, time_series
 
-
+# ---------------------------------------------------------------------
+# Main Execution
+# ---------------------------------------------------------------------
 def main():
     """Main execution function."""
     try:

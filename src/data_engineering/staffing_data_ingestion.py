@@ -1,14 +1,14 @@
 import logging
 from pathlib import Path
 from typing import Optional, Dict, List, Tuple
-
 import pandas as pd
 from tqdm import tqdm
 
 from data_engineering.connect import SQLServerConnection
 
-# Configure logging
-# Configure logging
+# ---------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s"
@@ -16,38 +16,84 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------
+# Custom Exceptions
+# ---------------------------------------------------------------------
 class DataQualityException(Exception):
     """Custom exception for data quality failures."""
     pass
 
 
+# ---------------------------------------------------------------------
+# Staffing Data Extractor
+# ---------------------------------------------------------------------
 class StaffingDataExtractor:
-    """
-    Extracts staffing counts by Service Line (Org L6) and Staff Group from ESR and saves to CSV.
-    """
+    """Extracts staffing capacity data from ESR and saves to CSV."""
 
+    # SQL query as class constant for better maintainability
     STAFFING_QUERY = """
+        -- ============================================================================
+        -- STAFFING DATA EXTRACTION QUERY
+        -- ============================================================================
+        -- Purpose: Extract staffing capacity metrics from ESR appraisal review data,
+        -- pulling staff counts by provider, service line, and staff group.
+        -- ============================================================================
         SELECT
             COUNT(DISTINCT [Assignment Number]) AS [Staff],
             [Staff Group],
-            [Org L6] AS [Service_Line]
+
+            -- ======================================================================== 
+            -- PROVIDER CODE EXTRACTION
+            -- ========================================================================
+            -- Provider code: the 3 digits after 'L5 '
+            SUBSTRING(
+                [Org L6],
+                CHARINDEX('L5 ', [Org L6]) + 3,
+                3
+            ) AS [ProviderCodeCurrent],
+
+            -- ======================================================================== 
+            -- SERVICE LINE EXTRACTION
+            -- ========================================================================
+            -- Service line: text after 'L5 XXX '
+            LTRIM(
+                SUBSTRING(
+                    [Org L6],
+                    CHARINDEX('L5 ', [Org L6]) + 7,
+                    LEN([Org L6])
+                )
+            ) AS [Service_Line]
+
         FROM [ISEVSQLMIS-BLK].[ESR].[dbo].[tbl_dt_Appraisal_Review_Detail]
-        GROUP BY [Org L6], [Staff Group]
-        ORDER BY [Org L6];
+
+        WHERE [Org L6] LIKE '%L5 [0-9][0-9][0-9] %'
+
+        GROUP BY
+            [Org L6],
+            [Staff Group]
+
+        ORDER BY
+            ProviderCodeCurrent,
+            Service_Line,
+            [Staff Group];
     """
 
     # Expected columns after normalisation
     EXPECTED_COLUMNS = [
         "staff",
         "staff_group",
-        "service_line"
+        "providercodecurrent",
+        "service_line",
     ]
 
+# -----------------------------------------------------------------
+# Initialisation
+# -----------------------------------------------------------------
     def __init__(
-        self,
-        config_path: Optional[str] = None,
-        output_dir: Optional[str] = None,
-        run_quality_checks: bool = True
+            self,
+            config_path: Optional[str] = None,
+            output_dir: Optional[str] = None,
+            run_quality_checks: bool = True,
     ):
         """
         Initialise SQL Server connection and output directory.
@@ -64,105 +110,184 @@ class StaffingDataExtractor:
         if not self.conn:
             raise ConnectionError("Failed to connect to the SQL Server database.")
 
-        # Default output directory: project_root/data
+        # Set up output directory using pathlib for better path handling
         if output_dir is None:
             project_root = Path(__file__).resolve().parents[2]
             self.output_dir = project_root / "data"
         else:
             self.output_dir = Path(output_dir)
 
+        # Create output directory if it doesn't exist
         self.output_dir.mkdir(parents=True, exist_ok=True)
         logger.info(f"📁 Output directory: {self.output_dir}")
 
+    # -----------------------------------------------------------------
+    # Helper Methods
+    # -----------------------------------------------------------------
     @staticmethod
     def _normalise_column_names(columns: list[str]) -> list[str]:
         """
         Convert column names to lowercase with underscores.
+
+        Args:
+            columns: List of column names
+
+        Returns:
+            List of normalised column names
         """
         return [
             col.lower()
-            .strip()
             .replace(" ", "_")
-            .replace("<", "under")
-            .replace(">", "over")
             .replace("+", "plus")
             for col in columns
         ]
 
+# -----------------------------------------------------------------
+# Schema Validation
+# -----------------------------------------------------------------
     def _check_schema(self, df: pd.DataFrame) -> Tuple[bool, List[str]]:
         """
         Check if DataFrame has expected columns.
+
+        Args:
+            df: DataFrame to check
+
+        Returns:
+            Tuple of (is_valid, list of issues)
         """
         issues = []
 
-        missing_cols = set(self.EXPECTED_COLUMNS) - set(df.columns)
-        if missing_cols:
-            issues.append(f"Missing columns: {', '.join(sorted(missing_cols))}")
+        # Check for missing columns
+        missing = set(self.EXPECTED_COLUMNS) - set(df.columns)
+        if missing:
+            issues.append(f"Missing columns: {', '.join(sorted(missing))}")
 
-        unexpected_cols = set(df.columns) - set(self.EXPECTED_COLUMNS)
-        if unexpected_cols:
-            issues.append(f"Unexpected columns: {', '.join(sorted(unexpected_cols))}")
+        # Check for unexpected columns
+        unexpected = set(df.columns) - set(self.EXPECTED_COLUMNS)
+        if unexpected:
+            issues.append(f"Unexpected columns: {', '.join(sorted(unexpected))}")
 
         return len(issues) == 0, issues
 
+# -----------------------------------------------------------------
+# Data Completeness Checks
+# -----------------------------------------------------------------
     def _check_data_completeness(self, df: pd.DataFrame) -> Tuple[bool, List[str]]:
         """
         Check for missing values in critical columns.
+
+        Args:
+            df: DataFrame to check
+
+        Returns:
+            Tuple of (is_valid, list of issues)
         """
         issues = []
-        critical_cols = ["service_line", "staff_group"]
+
+        # Critical columns that should not have nulls
+        critical_cols = ['providercodecurrent', 'service_line', 'staff_group']
 
         for col in critical_cols:
             if col in df.columns:
                 null_count = df[col].isnull().sum()
+                null_pct = (null_count / len(df)) * 100
+
                 if null_count > 0:
-                    issues.append(f"{col}: {null_count:,} missing values")
+                    issues.append(
+                        f"{col}: {null_count:,} missing values ({null_pct:.1f}%)"
+                    )
+
+        # Check for completely null rows
+        completely_null = df.isnull().all(axis=1).sum()
+        if completely_null > 0:
+            issues.append(f"Found {completely_null:,} completely empty rows")
 
         return len(issues) == 0, issues
 
+# -----------------------------------------------------------------
+# Data Type Checks
+# -----------------------------------------------------------------
     def _check_data_types(self, df: pd.DataFrame) -> Tuple[bool, List[str]]:
         """
-        Validate expected data types.
+        Check if data types are appropriate.
+
+        Args:
+            df: DataFrame to check
+
+        Returns:
+            Tuple of (is_valid, list of issues)
         """
         issues = []
 
-        if "staff" in df.columns and not pd.api.types.is_numeric_dtype(df["staff"]):
+        # Check staff is numeric
+        if 'staff' in df.columns and not pd.api.types.is_numeric_dtype(df['staff']):
             issues.append(f"staff is not numeric type (found: {df['staff'].dtype})")
 
         return len(issues) == 0, issues
 
+# -----------------------------------------------------------------
+# Data Range Checks
+# -----------------------------------------------------------------
     def _check_data_ranges(self, df: pd.DataFrame) -> Tuple[bool, List[str]]:
         """
-        Staff counts should not be negative.
+        Check if numeric values are within reasonable ranges.
+
+        Args:
+            df: DataFrame to check
+
+        Returns:
+            Tuple of (is_valid, list of issues)
         """
         issues = []
 
+        # Staff count should not be negative
         if "staff" in df.columns:
-            negative_count = (df["staff"] < 0).sum()
-            if negative_count > 0:
-                issues.append(f"staff: {negative_count:,} negative values found")
+            negative = (df["staff"] < 0).sum()
+            if negative > 0:
+                issues.append(f"staff: {negative:,} negative values found")
 
         return len(issues) == 0, issues
 
+# -----------------------------------------------------------------
+# Duplicate Detection
+# -----------------------------------------------------------------
     def _check_duplicates(self, df: pd.DataFrame) -> Tuple[bool, List[str]]:
         """
-        Check duplicates by (service_line, staff_group).
+        Check for duplicate records.
+
+        Args:
+            df: DataFrame to check
+
+        Returns:
+            Tuple of (is_valid, list of issues)
         """
         issues = []
-        key_cols = ["service_line", "staff_group"]
+
+        # Check for duplicate combinations of provider, service_line, and staff_group
+        key_cols = ["providercodecurrent", "service_line", "staff_group"]
 
         if all(col in df.columns for col in key_cols):
-            duplicates = df.duplicated(subset=key_cols, keep=False).sum()
-            if duplicates > 0:
+            dupes = df.duplicated(subset=key_cols, keep=False).sum()
+            if dupes > 0:
                 issues.append(
-                    f"Found {duplicates:,} duplicate rows based on {', '.join(key_cols)}"
+                    f"Found {dupes:,} duplicate rows based on "
+                    f"{', '.join(key_cols)}"
                 )
 
         return len(issues) == 0, issues
 
+# -----------------------------------------------------------------
+# Data Quality Checks
+# -----------------------------------------------------------------
     def run_data_quality_checks(self, df: pd.DataFrame) -> Dict[str, any]:
         """
         Run all data quality checks and return results.
+
+        Args:
+            df: DataFrame to check
+
+        Returns:
+            Dictionary with check results
         """
         logger.info("🔍 Running data quality checks...")
 
@@ -176,19 +301,20 @@ class StaffingDataExtractor:
 
         results = {"passed": [], "failed": [], "issues": {}}
 
-        for check_name, check_func in checks.items():
-            is_valid, issues = check_func(df)
+        for name, func in checks.items():
+            valid, issues = func(df)
 
-            if is_valid:
-                results["passed"].append(check_name)
-                logger.info(f"  ✅ {check_name}: PASSED")
+            if valid:
+                results["passed"].append(name)
+                logger.info(f"  ✅ {name}: PASSED")
             else:
-                results["failed"].append(check_name)
-                results["issues"][check_name] = issues
-                logger.warning(f"  ⚠️ {check_name}: FAILED")
+                results["failed"].append(name)
+                results["issues"][name] = issues
+                logger.warning(f"  ⚠️ {name}: FAILED")
                 for issue in issues:
                     logger.warning(f"     - {issue}")
 
+        # Summary
         total_checks = len(checks)
         passed_checks = len(results["passed"])
         failed_checks = len(results["failed"])
@@ -202,33 +328,41 @@ class StaffingDataExtractor:
 
         return results
 
+    # -----------------------------------------------------------------
+    # Data Extraction
+    # -----------------------------------------------------------------
     def extract_staffing_data(self) -> pd.DataFrame:
         """
-        Extract staffing data from SQL Server.
+        Extract staffing data from ESR.
 
         Returns:
-            DataFrame: The extracted staffing data.
+            pandas.DataFrame: The extracted data
 
         Raises:
-            DataQualityException: If critical checks fail.
+            Exception: If data extraction fails
+            DataQualityException: If quality checks fail
         """
-        logger.info("👥 Fetching staffing data from SQL Server...")
+        logger.info("📊 Fetching staffing data from ESR...")
 
         try:
             cursor = self.conn.cursor()
             cursor.execute(self.STAFFING_QUERY)
 
+            # Fetch all rows
             logger.info("⏳ Fetching rows...")
             rows = cursor.fetchall()
             total_rows = len(rows)
 
             if total_rows == 0:
-                logger.warning("⚠️ No staffing data retrieved from database")
+                logger.warning("⚠️ No data retrieved from database")
                 return pd.DataFrame()
 
-            columns = [column[0] for column in cursor.description]
+            # Get column names
+            columns = [c[0] for c in cursor.description]
+
             logger.info(f"📊 Processing {total_rows:,} rows...")
 
+            # Create DataFrame with progress bar
             with tqdm(total=total_rows, desc="Loading data", unit="rows") as pbar:
                 df = pd.DataFrame.from_records(rows, columns=columns)
                 pbar.update(total_rows)
@@ -236,12 +370,14 @@ class StaffingDataExtractor:
             # Normalise column names
             df.columns = self._normalise_column_names(df.columns)
 
-            logger.info(f"✅ Retrieved {len(df):,} rows of staffing data.")
-            logger.info(f"📊 Columns: {', '.join(df.columns)}")
+            logger.info(f"✅ Retrieved {len(df):,} rows from source views.")
+            logger.info(f"📊 Columns: {', '.join(df.columns)} ({len(df.columns)} total)")
 
-            # Run quality checks
+            # Run data quality checks
             if self.run_quality_checks:
                 quality_results = self.run_data_quality_checks(df)
+
+                # Optionally raise exception if critical checks fail
                 critical_checks = ["Schema Validation", "Data Types"]
                 failed_critical = [c for c in critical_checks if c in quality_results["failed"]]
 
@@ -253,29 +389,32 @@ class StaffingDataExtractor:
             return df
 
         except Exception as e:
-            logger.error(f"❌ Error extracting staffing data: {str(e)}")
+            logger.error(f"❌ Error extracting data: {str(e)}")
             raise
         finally:
             if "cursor" in locals():
                 cursor.close()
 
-    def save_to_csv(self, df: pd.DataFrame, filename: str = "staffing_data.csv") -> Optional[Path]:
+    # -----------------------------------------------------------------
+    # Data Persistence
+    # -----------------------------------------------------------------
+    def save_to_csv(self, df: pd.DataFrame, filename: str = "staffing_data.csv") -> Path:
         """
-        Save staffing DataFrame to CSV.
+        Save DataFrame to CSV file.
 
         Args:
-            df: DataFrame to save
-            filename: Output filename
+            df: pandas DataFrame to save
+            filename: Name of the CSV file (default: staffing_data.csv)
 
         Returns:
-            Path to saved file, or None if nothing saved
+            Path: Path to the saved CSV file
         """
         if df.empty:
             logger.warning("⚠️ DataFrame is empty. No file saved.")
             return None
 
         filepath = self.output_dir / filename
-        logger.info(f"💾 Saving staffing data to CSV: {filepath}")
+        logger.info(f"💾 Saving data to CSV: {filepath}")
 
         try:
             with tqdm(total=1, desc="Writing CSV", unit="file") as pbar:
@@ -283,16 +422,19 @@ class StaffingDataExtractor:
                 pbar.update(1)
 
             file_size_kb = filepath.stat().st_size / 1024
-            logger.info(f"✅ Staffing data saved to: {filepath}")
+            logger.info(f"✅ Data saved to: {filepath}")
             logger.info(f"📄 File size: {file_size_kb:.2f} KB")
             logger.info(f"📊 Rows: {len(df):,} | Columns: {len(df.columns)}")
 
             return filepath
 
         except Exception as e:
-            logger.error(f"❌ Error saving staffing CSV: {str(e)}")
+            logger.error(f"❌ Error saving CSV: {str(e)}")
             raise
 
+    # -----------------------------------------------------------------
+    # Connection Management
+    # -----------------------------------------------------------------
     def close_connection(self):
         """Close the database connection."""
         if self.conn:
@@ -308,15 +450,22 @@ class StaffingDataExtractor:
         self.close_connection()
 
 
+# ---------------------------------------------------------------------
+# Utility Loader
+# ---------------------------------------------------------------------
 def load_staffing_data(csv_path: Optional[str] = None) -> pd.DataFrame:
     """
     Utility function to load staffing data from CSV.
 
     Args:
-        csv_path: Path to CSV file. If None, loads staffing_data.csv from default location.
+        csv_path: Path to CSV file. If None, loads staffing_data.csv
+                  from default location.
 
     Returns:
-        DataFrame: The staffing dataset
+        pandas.DataFrame: The staffing data
+
+    Raises:
+        FileNotFoundError: If the CSV file doesn't exist
     """
     if csv_path is None:
         project_root = Path(__file__).resolve().parents[2]
@@ -327,17 +476,24 @@ def load_staffing_data(csv_path: Optional[str] = None) -> pd.DataFrame:
     if not csv_path.exists():
         raise FileNotFoundError(f"Staffing data file not found at: {csv_path}")
 
-    logger.info(f"📂 Loading staffing data from: {csv_path}")
+    logger.info(f"📂 Loading data from: {csv_path}")
     df = pd.read_csv(csv_path)
     logger.info(f"✅ Loaded {len(df):,} records with {len(df.columns)} columns")
 
     return df
 
 
+# ---------------------------------------------------------------------
+# Script Entry Point
+# ---------------------------------------------------------------------
 if __name__ == "__main__":
+    # Use context manager for automatic connection cleanup
     try:
         with StaffingDataExtractor() as extractor:
+            # Extract data from ESR
             df = extractor.extract_staffing_data()
+
+            # Save as staffing_data.csv
             output_file = extractor.save_to_csv(df)
 
             if output_file:
