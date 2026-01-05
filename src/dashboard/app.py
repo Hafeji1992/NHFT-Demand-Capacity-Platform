@@ -7,6 +7,7 @@ Interactive Dash application for visualising demand and capacity data.
 import logging
 from pathlib import Path
 from typing import Optional
+from io import StringIO  # ← ADD THIS
 
 import dash
 from dash import dcc, html, Input, Output, State
@@ -275,7 +276,7 @@ def update_summary_stats(data_json):
     if data_json is None or data_handler is None:
         return html.Div("No data available", className="alert alert-warning")
 
-    df = pd.read_json(data_json, orient="split")
+    df = pd.read_json(StringIO(data_json), orient="split")
 
     if df.empty:
         return html.Div(
@@ -331,7 +332,8 @@ def update_footer(data_json):
     if data_json is None or data_handler is None:
         latest_date = "N/A"
     else:
-        df = pd.read_json(data_json, orient="split")
+        df = pd.read_json(StringIO(data_json), orient="split")
+
         if not df.empty:
             df["periodend"] = pd.to_datetime(df["periodend"])
             latest_date = df["periodend"].max().strftime("%d %B %Y")
@@ -361,7 +363,8 @@ def update_tab_content(active_tab, data_json):
             className="alert alert-info",
         )
 
-    df = pd.read_json(data_json, orient="split")
+    df = pd.read_json(StringIO(data_json), orient="split")
+
     df["periodend"] = pd.to_datetime(df["periodend"])
 
     if df.empty:
@@ -381,10 +384,12 @@ def update_tab_content(active_tab, data_json):
 
 def create_overview_tab(df):
     """Create overview tab content."""
-    # Time series of key metrics
+
+    # -----------------------------
+    # Time series chart
+    # -----------------------------
     df_sorted = df.sort_values("periodend")
 
-    # Aggregate by month
     monthly = (
         df_sorted.groupby("year_month")
         .agg(
@@ -392,13 +397,12 @@ def create_overview_tab(df):
                 "referrals": "sum",
                 "waiters": "sum",
                 "caseload": "sum",
-                "totalcontacts": "sum",
+                "clockstopactuals": "sum",
             }
         )
         .reset_index()
     )
 
-    # Create multi-line chart
     fig = go.Figure()
 
     fig.add_trace(
@@ -431,6 +435,16 @@ def create_overview_tab(df):
         )
     )
 
+    fig.add_trace(
+        go.Scatter(
+            x=monthly["year_month"],
+            y=monthly["clockstopactuals"],
+            name="Clock Stop Actuals",
+            mode="lines+markers",
+            line=dict(width=2),
+        )
+    )
+
     fig.update_layout(
         title="Key Metrics Over Time",
         xaxis_title="Period",
@@ -439,28 +453,45 @@ def create_overview_tab(df):
         height=500,
     )
 
+    # -----------------------------
+    # Data summary table
+    # -----------------------------
+    exclude_cols = {
+        "providercodecurrent",
+        "service_line",
+        "periodend",
+        "year",
+        "month",
+        "quarter",
+    }
+
+    summary_columns = [
+        col
+        for col in df.columns
+        if col not in exclude_cols and pd.api.types.is_numeric_dtype(df[col])
+    ]
+
+    summary_df = (
+        df.groupby("service_line")[summary_columns].sum().reset_index().round(0)
+    )
+
+    summary_table = dbc.Table.from_dataframe(
+        summary_df,
+        striped=True,
+        bordered=True,
+        hover=True,
+        responsive=True,
+    )
+
+    # -----------------------------
+    # Layout
+    # -----------------------------
     return html.Div(
         [
             dcc.Graph(figure=fig),
             html.Hr(),
             html.H4("Data Summary", className="mt-4"),
-            dbc.Table.from_dataframe(
-                df.groupby("service_line")
-                .agg(
-                    {
-                        "referrals": "sum",
-                        "waiters": "sum",
-                        "caseload": "sum",
-                        "totalcontacts": "sum",
-                    }
-                )
-                .reset_index()
-                .round(0),
-                striped=True,
-                bordered=True,
-                hover=True,
-                responsive=True,
-            ),
+            summary_table,
         ]
     )
 
