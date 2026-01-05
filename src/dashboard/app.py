@@ -7,10 +7,10 @@ Interactive Dash application for visualising demand and capacity data.
 import logging
 from pathlib import Path
 from typing import Optional
-from io import StringIO  # ← ADD THIS
+from io import StringIO
 
 import dash
-from dash import dcc, html, Input, Output, State
+from dash import dcc, html, Input, Output, State, dash_table
 import dash_bootstrap_components as dbc
 import plotly.express as px
 import plotly.graph_objects as go
@@ -403,9 +403,9 @@ def create_overview_tab(df):
         .reset_index()
     )
 
-    fig = go.Figure()
+    fig_timeseries = go.Figure()
 
-    fig.add_trace(
+    fig_timeseries.add_trace(
         go.Scatter(
             x=monthly["year_month"],
             y=monthly["referrals"],
@@ -415,7 +415,7 @@ def create_overview_tab(df):
         )
     )
 
-    fig.add_trace(
+    fig_timeseries.add_trace(
         go.Scatter(
             x=monthly["year_month"],
             y=monthly["waiters"],
@@ -425,7 +425,7 @@ def create_overview_tab(df):
         )
     )
 
-    fig.add_trace(
+    fig_timeseries.add_trace(
         go.Scatter(
             x=monthly["year_month"],
             y=monthly["caseload"],
@@ -435,7 +435,7 @@ def create_overview_tab(df):
         )
     )
 
-    fig.add_trace(
+    fig_timeseries.add_trace(
         go.Scatter(
             x=monthly["year_month"],
             y=monthly["clockstopactuals"],
@@ -445,13 +445,92 @@ def create_overview_tab(df):
         )
     )
 
-    fig.update_layout(
+    fig_timeseries.update_layout(
         title="Key Metrics Over Time",
         xaxis_title="Period",
         yaxis_title="Count",
         hovermode="x unified",
         height=500,
     )
+
+    # -----------------------------
+    # 18-week waiters split (stacked bar)
+    # -----------------------------
+    # Check which column names actually exist
+    under_18_col = None
+    over_18_col = None
+
+    # Try different possible column name variations
+    if "waitersunder18weeks" in df_sorted.columns:
+        under_18_col = "waitersunder18weeks"
+    elif "waiters<18weeks" in df_sorted.columns:
+        under_18_col = "waiters<18weeks"
+
+    if "waiters18plusweeks" in df_sorted.columns:
+        over_18_col = "waiters18plusweeks"
+    elif "waiters18+weeks" in df_sorted.columns:
+        over_18_col = "waiters18+weeks"
+
+    # Only create the chart if we have the required columns
+    if under_18_col and over_18_col:
+        waiters_18wk = (
+            df_sorted.groupby("year_month")
+            .agg(
+                {
+                    under_18_col: "sum",
+                    over_18_col: "sum",
+                }
+            )
+            .reset_index()
+        )
+
+        fig_18wk = go.Figure()
+
+        fig_18wk.add_trace(
+            go.Bar(
+                x=waiters_18wk["year_month"],
+                y=waiters_18wk[under_18_col],
+                name="Under 18 Weeks",
+                marker_color="#636EFA",  # Plotly blue (matches time series)
+            )
+        )
+
+        fig_18wk.add_trace(
+            go.Bar(
+                x=waiters_18wk["year_month"],
+                y=waiters_18wk[over_18_col],
+                name="18+ Weeks",
+                marker_color="#EF553B",  # Plotly red (matches time series)
+            )
+        )
+
+        fig_18wk.update_layout(
+            title="Waiting List Breakdown: Under vs Over 18 Weeks",
+            xaxis_title="Period",
+            yaxis_title="Number of Waiters",
+            barmode="stack",
+            height=400,
+            legend=dict(
+                orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1
+            ),
+        )
+
+        waiters_chart = dbc.Row(
+            [
+                dbc.Col(
+                    dcc.Graph(figure=fig_18wk),
+                    width=12,
+                ),
+            ],
+            className="mb-4",
+        )
+    else:
+        # Fallback if columns don't exist
+        waiters_chart = dbc.Alert(
+            f"18-week waiter breakdown not available. Available columns: {', '.join(df.columns)}",
+            color="warning",
+            className="mb-4",
+        )
 
     # -----------------------------
     # Data summary table
@@ -463,6 +542,8 @@ def create_overview_tab(df):
         "year",
         "month",
         "quarter",
+        "year_month",
+        "month_name",
     }
 
     summary_columns = [
@@ -481,6 +562,22 @@ def create_overview_tab(df):
         bordered=True,
         hover=True,
         responsive=True,
+        class_name="sortable-table",
+    )
+
+    summary_table = dash_table.DataTable(
+        data=summary_df.to_dict("records"),
+        columns=[{"name": i, "id": i} for i in summary_df.columns],
+        sort_action="native",
+        style_table={"overflowX": "auto"},
+        style_cell={
+            "textAlign": "left",
+            "padding": "10px",
+        },
+        style_header={"backgroundColor": "rgb(230, 230, 230)", "fontWeight": "bold"},
+        style_data_conditional=[
+            {"if": {"row_index": "odd"}, "backgroundColor": "rgb(248, 248, 248)"}
+        ],
     )
 
     # -----------------------------
@@ -488,10 +585,29 @@ def create_overview_tab(df):
     # -----------------------------
     return html.Div(
         [
-            dcc.Graph(figure=fig),
+            # Main time series chart
+            dbc.Row(
+                [
+                    dbc.Col(dcc.Graph(figure=fig_timeseries), width=12),
+                ],
+                className="mb-4",
+            ),
+            # Stacked 18-week bar chart
+            waiters_chart,
+            # Data summary table
             html.Hr(),
-            html.H4("Data Summary", className="mt-4"),
-            summary_table,
+            dbc.Row(
+                [
+                    dbc.Col(
+                        [
+                            html.H4("Service Line Summary", className="mb-3"),
+                            summary_table,
+                        ],
+                        width=12,
+                    ),
+                ],
+                className="mb-4",
+            ),
         ]
     )
 
