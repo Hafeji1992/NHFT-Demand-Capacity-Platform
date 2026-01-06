@@ -54,7 +54,17 @@ app = dash.Dash(
 def create_metric_card(
     title: str, value: str, icon: str = "📊", color: str = "primary"
 ):
-    """Create a metric card component."""
+    """Create a small KPI/metric card for the dashboard.
+
+    Args:
+        title: Card title label.
+        value: Pre-formatted value to display (e.g., "1,234").
+        icon: Emoji/icon prefix for the title.
+        color: Bootstrap theme colour name (e.g., "primary", "warning").
+
+    Returns:
+        A Dash Bootstrap Components Card.
+    """
     return dbc.Card(
         [
             dbc.CardBody(
@@ -76,7 +86,15 @@ def create_metric_card(
 
 
 def create_filter_section():
-    """Create the filter controls section."""
+    """Create the top-of-page filter controls.
+
+    The dropdown displays labels as "ProviderCodeCurrent - Service Line" from the
+    patient dataset, but filtering logic uses provider codes so it can be applied
+    consistently across both patient and staffing datasets.
+
+    Returns:
+        A Dash layout component (dbc.Row) containing date + service filters.
+    """
     if data_handler is None:
         return html.Div("Data not available", className="alert alert-danger")
 
@@ -238,7 +256,19 @@ app.layout = dbc.Container(
     ],
 )
 def filter_data(n_clicks, start_date, end_date, service_lines):
-    """Filter data based on user selections."""
+    """Filter patient data based on the UI controls.
+
+    Args:
+        n_clicks: Number of clicks on the "Apply Filters" button.
+        start_date: Start date (YYYY-MM-DD) from the date picker.
+        end_date: End date (YYYY-MM-DD) from the date picker.
+        service_lines: List of selected dropdown values in the form
+            "providercodecurrent|service_line".
+
+    Returns:
+        JSON-encoded filtered patient DataFrame (orient="split"), or None if data
+        is unavailable.
+    """
     if data_handler is None or data_handler.patient_df is None:
         return None
 
@@ -261,7 +291,15 @@ def filter_data(n_clicks, start_date, end_date, service_lines):
     Output("summary-stats-row", "children"), [Input("filtered-data-store", "data")]
 )
 def update_summary_stats(data_json):
-    """Update summary statistics cards for the selected date range."""
+    """Update the KPI cards row based on the filtered dataset.
+
+    Args:
+        data_json: JSON-encoded DataFrame (orient="split") from dcc.Store.
+
+    Returns:
+        A Dash component representing the KPI cards row, or an alert div when no
+        data is available.
+    """
     if data_json is None or data_handler is None:
         return html.Div("No data available", className="alert alert-warning")
 
@@ -317,7 +355,14 @@ def update_summary_stats(data_json):
     Output("footer-content", "children"), [Input("filtered-data-store", "data")]
 )
 def update_footer(data_json):
-    """Update footer with data last refreshed date."""
+    """Update footer text, including the latest period end date.
+
+    Args:
+        data_json: JSON-encoded DataFrame (orient="split") from dcc.Store.
+
+    Returns:
+        A Dash HTML paragraph element with the refresh date.
+    """
     if data_json is None or data_handler is None:
         latest_date = "N/A"
     else:
@@ -345,7 +390,16 @@ def update_footer(data_json):
     [Input("main-tabs", "value"), Input("filtered-data-store", "data")],
 )
 def update_tab_content(active_tab, data_json):
-    """Update content based on selected tab."""
+    """Render the selected tab content.
+
+    Args:
+        active_tab: Selected tab ID ("overview-tab", "demand-tab", "capacity-tab").
+        data_json: JSON-encoded DataFrame (orient="split") from dcc.Store.
+
+    Returns:
+        A Dash component containing the tab content (charts/tables), or an alert
+        div if data is missing/empty.
+    """
     if data_json is None:
         return html.Div(
             "No data available. Click 'Apply Filters' to load data.",
@@ -372,7 +426,14 @@ def update_tab_content(active_tab, data_json):
 
 
 def create_overview_tab(df):
-    """Create overview tab content."""
+    """Create the Overview tab layout.
+
+    Args:
+        df: Filtered patient dataset.
+
+    Returns:
+        A Dash layout component containing the overview charts.
+    """
 
     # -----------------------------
     # Key Metrics (Time series chart)
@@ -526,7 +587,15 @@ def create_overview_tab(df):
 
 
 def create_service_line_summary_table(df: pd.DataFrame):
-    """Create the patient metrics summary table by provider code + service line."""
+    """Create the patient summary DataTable by provider code and service line.
+
+    Args:
+        df: Filtered patient dataset.
+
+    Returns:
+        A Dash DataTable where rows are (providercodecurrent, service_line) and
+        numeric metrics are aggregated by sum.
+    """
     exclude_cols = {
         # Keep these as identifier columns rather than aggregated numeric metrics
         "providercodecurrent",
@@ -571,7 +640,16 @@ def create_staffing_pivot_table(
     patient_df: pd.DataFrame,
     staffing_df: Optional[pd.DataFrame],
 ):
-    """Create a staffing pivot table: rows=provider+service_line, cols=staff_group, values=staff."""
+    """Create a staffing pivot DataTable by provider/service line.
+
+    Args:
+        patient_df: Filtered patient dataset (used to determine selected providers).
+        staffing_df: Staffing dataset (typically data_handler.staffing_df).
+
+    Returns:
+        A Dash DataTable pivoted to one row per (providercodecurrent, service_line)
+        and one column per staff_group, or an alert div if data is missing.
+    """
     if staffing_df is None or staffing_df.empty:
         return html.Div(
             "No staffing data available.",
@@ -662,7 +740,14 @@ def create_staffing_pivot_table(
 
 
 def create_demand_tab(df):
-    """Create demand analysis tab content."""
+    """Create the Demand tab layout.
+
+    Args:
+        df: Filtered patient dataset.
+
+    Returns:
+        A Dash layout component containing the demand alert and patient summary table.
+    """
 
     summary_table = create_service_line_summary_table(df)
 
@@ -704,7 +789,14 @@ def create_demand_tab(df):
 
 
 def create_capacity_tab(df):
-    """Create capacity analysis tab content - stub for future development."""
+    """Create the Capacity tab layout.
+
+    Args:
+        df: Filtered patient dataset (used to select provider(s)).
+
+    Returns:
+        A Dash layout component containing the capacity alert and staffing pivot table.
+    """
     if data_handler is None:
         return html.Div("Data not available", className="alert alert-danger")
 
