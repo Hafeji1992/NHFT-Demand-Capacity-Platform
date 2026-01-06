@@ -80,7 +80,9 @@ def create_filter_section():
     if data_handler is None:
         return html.Div("Data not available", className="alert alert-danger")
 
-    # Get unique service lines with provider codes
+    # Build dropdown options from patient data.
+    # UX: show the full service_line label (user-friendly)
+    # Behaviour: filter by providercodecurrent (filters both patient + staffing reliably)
     if data_handler.patient_df is not None:
         service_line_data = (
             data_handler.patient_df[["providercodecurrent", "service_line"]]
@@ -89,7 +91,7 @@ def create_filter_section():
         )
         service_line_options = [
             {
-                "label": f"{row['providercodecurrent']} - {row['service_line']}",
+                "label": f"{row['service_line']}",
                 "value": f"{row['providercodecurrent']}|{row['service_line']}",
             }
             for _, row in service_line_data.iterrows()
@@ -129,7 +131,7 @@ def create_filter_section():
                     dbc.Row(
                         [
                             dbc.Col(
-                                html.Label("Service Lines:", className="fw-bold"),
+                                html.Label("Service:", className="fw-bold"),
                                 width="auto",
                             ),
                             dbc.Col(
@@ -137,7 +139,7 @@ def create_filter_section():
                                     id="service-line-dropdown",
                                     options=service_line_options,
                                     multi=True,
-                                    placeholder="Select service lines (all if none selected)",
+                                    placeholder="Select service(s) (all if none selected)",
                                 ),
                                 width=True,
                             ),
@@ -247,22 +249,9 @@ def filter_data(n_clicks, start_date, end_date, service_lines):
         df = data_handler.filter_by_date_range(df, start_date, end_date)
 
     if service_lines:
-        # Parse the combined provider|service_line values
-        providers = []
-        service_line_names = []
-        for item in service_lines:
-            provider, service_line = item.split("|")
-            providers.append(provider)
-            service_line_names.append(service_line)
-
-        # Filter by matching both provider and service line
-        df = df[
-            df.apply(
-                lambda row: f"{row['providercodecurrent']}|{row['service_line']}"
-                in service_lines,
-                axis=1,
-            )
-        ]
+        # Users select service labels, but we filter by provider code only.
+        selected_providers = sorted({item.split("|")[0] for item in service_lines})
+        df = df[df["providercodecurrent"].astype(str).isin(selected_providers)]
 
     # Store as JSON
     return df.to_json(date_format="iso", orient="split")
@@ -572,7 +561,7 @@ def create_staffing_pivot_table(
             className="alert alert-warning",
         )
 
-    required_cols = {"service_line", "staff_group", "staff"}
+    required_cols = {"providercodecurrent", "service_line", "staff_group", "staff"}
     if not required_cols.issubset(set(staffing_df.columns)):
         missing = sorted(required_cols - set(staffing_df.columns))
         return html.Div(
@@ -580,25 +569,27 @@ def create_staffing_pivot_table(
             className="alert alert-danger",
         )
 
-    selected_service_lines = []
+    selected_providers: list[str] = []
     if (
         patient_df is not None
         and not patient_df.empty
-        and "service_line" in patient_df.columns
+        and "providercodecurrent" in patient_df.columns
     ):
-        selected_service_lines = (
-            patient_df["service_line"].dropna().astype(str).unique().tolist()
+        selected_providers = (
+            patient_df["providercodecurrent"].dropna().astype(str).unique().tolist()
         )
 
     staffing_filtered = staffing_df.copy()
-    if selected_service_lines:
+    if selected_providers:
         staffing_filtered = staffing_filtered[
-            staffing_filtered["service_line"].astype(str).isin(selected_service_lines)
+            staffing_filtered["providercodecurrent"]
+            .astype(str)
+            .isin(selected_providers)
         ]
 
     if staffing_filtered.empty:
         return html.Div(
-            "No staffing rows match the selected service lines.",
+            "No staffing rows match the selected provider(s).",
             className="alert alert-info",
         )
 
