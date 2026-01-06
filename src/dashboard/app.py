@@ -376,9 +376,8 @@ def update_footer(data_json):
 
     return html.P(
         [
-            "© 2025 Northamptonshire Healthcare Foundation Trust | ",
+            "© 2025 Northamptonshire Healthcare NHS Foundation Trust | ",
             "BI Development Team | ",
-            "Data Science Project | ",
             html.Strong(f"Data Last Refreshed: {latest_date}"),
         ],
         className="text-center text-muted mb-0",
@@ -447,6 +446,8 @@ def create_overview_tab(df):
                 "referrals": "sum",
                 "waiters": "sum",
                 "caseload": "sum",
+                "dischargesfromcaseload": "sum",
+                "totalcontacts": "sum",
                 "clockstopactuals": "sum",
             }
         )
@@ -461,20 +462,47 @@ def create_overview_tab(df):
         ("Referrals", "referrals"),
         ("Waiters", "waiters"),
         ("Caseload", "caseload"),
+        ("Contacts", "totalcontacts"),
+        ("Discharges", "dischargesfromcaseload"),
         ("Clock Stop Actuals", "clockstopactuals"),
     ]
 
     for i, (label, col) in enumerate(series):
+        if col not in monthly.columns:
+            continue
+
+        # Only show Referrals + Clock Stop Actuals by default; keep others selectable.
+        default_visible = col in {"referrals", "clockstopactuals"}
+        color = palette[i % len(palette)]
+
+        # Line trace
         fig_timeseries.add_trace(
             go.Scatter(
                 x=monthly["year_month"],
                 y=monthly[col],
                 name=label,
-                mode="lines+markers",
-                line=dict(width=3, shape="spline", color=palette[i % len(palette)]),
-                marker=dict(size=7, color=palette[i % len(palette)]),
+                legendgroup=col,
+                showlegend=False,
+                mode="lines",
+                visible=True if default_visible else "legendonly",
+                line=dict(width=3, shape="spline", color=color),
                 # With hovermode='x unified', keep the date in the unified header (shown once)
                 hovertemplate="%{fullData.name}: <b>%{y:,}</b><extra></extra>",
+            )
+        )
+
+        # Marker trace (legend entry shown as circle only)
+        fig_timeseries.add_trace(
+            go.Scatter(
+                x=monthly["year_month"],
+                y=monthly[col],
+                name=label,
+                legendgroup=col,
+                showlegend=True,
+                mode="markers",
+                visible=True if default_visible else "legendonly",
+                marker=dict(size=9, color=color),
+                hoverinfo="skip",
             )
         )
 
@@ -486,7 +514,7 @@ def create_overview_tab(df):
             font=dict(size=22),
         ),
         xaxis_title="Period",
-        yaxis_title="Count",
+        yaxis_title="Number of Patients",
         hovermode="x unified",
         height=500,
         template="plotly_white",
@@ -504,6 +532,7 @@ def create_overview_tab(df):
         ),
         legend_itemclick="toggle",
         legend_itemdoubleclick="toggleothers",
+        legend_groupclick="togglegroup",
         margin=dict(l=40, r=200, t=80, b=50),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
@@ -538,6 +567,7 @@ def create_overview_tab(df):
             y=waiters_18wk["waitersunder18weeks"],
             name="Under 18 Weeks",
             marker_color="#636EFA",  # Plotly blue
+            hovertemplate="%{fullData.name}: <b>%{y:,}</b><extra></extra>",
         )
     )
 
@@ -547,22 +577,53 @@ def create_overview_tab(df):
             y=waiters_18wk["waiters18plusweeks"],
             name="18+ Weeks",
             marker_color="#EF553B",  # Plotly red
+            hovertemplate="%{fullData.name}: <b>%{y:,}</b><extra></extra>",
         )
     )
 
     fig_18wk.update_layout(
-        title="Waiting List Breakdown: Under vs Over 18 Weeks",
+        title=dict(
+            text="Waiting List Breakdown: Under vs Over 18 Weeks",
+            x=0.5,
+            xanchor="center",
+            font=dict(size=20),
+        ),
         xaxis_title="Period",
         yaxis_title="Number of Waiters",
         barmode="stack",
         height=400,
+        hovermode="x unified",
+        template="plotly_white",
         legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=1.02,
-            xanchor="right",
-            x=1,
+            title=dict(text="Waiters split (click to hide/show)"),
+            orientation="v",
+            yanchor="top",
+            y=1,
+            xanchor="left",
+            x=1.02,
+            bgcolor="rgba(255,255,255,0.85)",
+            bordercolor="rgba(0,0,0,0.08)",
+            borderwidth=1,
+            itemsizing="constant",
         ),
+        legend_itemclick="toggle",
+        legend_itemdoubleclick="toggleothers",
+        margin=dict(l=40, r=200, t=70, b=50),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+    )
+
+    fig_18wk.update_xaxes(
+        showgrid=False,
+        tickangle=-30,
+        ticks="outside",
+        ticklen=6,
+    )
+    fig_18wk.update_yaxes(
+        tickformat=",",
+        showgrid=True,
+        gridcolor="rgba(0,0,0,0.08)",
+        zeroline=False,
     )
 
     waiters_chart = dbc.Row(
