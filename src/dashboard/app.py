@@ -394,52 +394,64 @@ def create_overview_tab(df):
 
     fig_timeseries = go.Figure()
 
-    fig_timeseries.add_trace(
-        go.Scatter(
-            x=monthly["year_month"],
-            y=monthly["referrals"],
-            name="Referrals",
-            mode="lines+markers",
-            line=dict(width=2),
-        )
-    )
+    # Use Plotly's default qualitative palette for consistent, accessible colours
+    palette = px.colors.qualitative.Plotly
+    series = [
+        ("Referrals", "referrals"),
+        ("Waiters", "waiters"),
+        ("Caseload", "caseload"),
+        ("Clock Stop Actuals", "clockstopactuals"),
+    ]
 
-    fig_timeseries.add_trace(
-        go.Scatter(
-            x=monthly["year_month"],
-            y=monthly["waiters"],
-            name="Waiters",
-            mode="lines+markers",
-            line=dict(width=2),
+    for i, (label, col) in enumerate(series):
+        fig_timeseries.add_trace(
+            go.Scatter(
+                x=monthly["year_month"],
+                y=monthly[col],
+                name=label,
+                mode="lines+markers",
+                line=dict(width=3, shape="spline", color=palette[i % len(palette)]),
+                marker=dict(size=7, color=palette[i % len(palette)]),
+                # With hovermode='x unified', keep the date in the unified header (shown once)
+                hovertemplate="%{fullData.name}: <b>%{y:,}</b><extra></extra>",
+            )
         )
-    )
-
-    fig_timeseries.add_trace(
-        go.Scatter(
-            x=monthly["year_month"],
-            y=monthly["caseload"],
-            name="Caseload",
-            mode="lines+markers",
-            line=dict(width=2),
-        )
-    )
-
-    fig_timeseries.add_trace(
-        go.Scatter(
-            x=monthly["year_month"],
-            y=monthly["clockstopactuals"],
-            name="Clock Stop Actuals",
-            mode="lines+markers",
-            line=dict(width=2),
-        )
-    )
 
     fig_timeseries.update_layout(
-        title="Key Metrics Over Time",
+        title=dict(
+            text="Key Metrics Over Time",
+            x=0.5,
+            xanchor="center",
+            font=dict(size=22),
+        ),
         xaxis_title="Period",
         yaxis_title="Count",
         hovermode="x unified",
         height=500,
+        template="plotly_white",
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.12,
+            xanchor="left",
+            x=0,
+        ),
+        margin=dict(l=40, r=20, t=80, b=50),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+    )
+
+    fig_timeseries.update_xaxes(
+        showgrid=False,
+        tickangle=-30,
+        ticks="outside",
+        ticklen=6,
+    )
+    fig_timeseries.update_yaxes(
+        tickformat=",",
+        showgrid=True,
+        gridcolor="rgba(0,0,0,0.08)",
+        zeroline=False,
     )
 
     # -----------------------------
