@@ -1,3 +1,9 @@
+"""
+NHFT Staffing Summary Statistics
+=================================
+Generates descriptive summary statistics from the staffing (capacity) dataset.
+"""
+
 import logging
 from pathlib import Path
 from typing import Optional, Dict, Any, Tuple
@@ -15,8 +21,7 @@ from data_engineering.staffing_data_ingestion import load_staffing_data
 # Logging
 # ---------------------------------------------------------------------
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s"
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
@@ -80,10 +85,14 @@ class StaffingSummaryStatistics:
             "key_metrics": {
                 "total_staff": int(df["staff"].sum()),
                 "average_staff_per_service": float(
-                    df.groupby(["providercodecurrent", "service_line"])["staff"].sum().mean()
+                    df.groupby(["providercodecurrent", "service_line"])["staff"]
+                    .sum()
+                    .mean()
                 ),
                 "median_staff_per_service": float(
-                    df.groupby(["providercodecurrent", "service_line"])["staff"].sum().median()
+                    df.groupby(["providercodecurrent", "service_line"])["staff"]
+                    .sum()
+                    .median()
                 ),
             },
         }
@@ -209,9 +218,9 @@ class StaffingSummaryStatistics:
     # Orchestrator
     # -----------------------------------------------------------------
     def generate_all_statistics(
-            self,
-            df: pd.DataFrame,
-            print_summary: bool = True,
+        self,
+        df: pd.DataFrame,
+        print_summary: bool = True,
     ) -> Tuple[Dict[str, Any], pd.DataFrame, pd.DataFrame]:
         """
         Generate all summary statistics.
@@ -249,8 +258,8 @@ def main():
         stats = StaffingSummaryStatistics()
 
         # Generate all statistics
-        summary, service_breakdown, staff_group_breakdown = stats.generate_all_statistics(
-            df, print_summary=True
+        summary, service_breakdown, staff_group_breakdown = (
+            stats.generate_all_statistics(df, print_summary=True)
         )
 
         logger.info("🎉 Summary statistics generated successfully!")
@@ -271,7 +280,9 @@ def main():
 
     except FileNotFoundError as e:
         logger.error(f"❌ Data file not found: {e}")
-        logger.info("💡 Please run staffing_data_ingestion.py first to generate the data file.")
+        logger.info(
+            "💡 Please run staffing_data_ingestion.py first to generate the data file."
+        )
     except ValueError as e:
         logger.error(f"❌ Data validation error: {e}")
     except Exception:

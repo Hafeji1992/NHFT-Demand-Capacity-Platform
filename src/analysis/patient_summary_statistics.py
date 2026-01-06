@@ -1,3 +1,9 @@
+"""
+NHFT Patient Summary Statistics
+================================
+Generates descriptive summary statistics from the patient demand dataset.
+"""
+
 import logging
 from pathlib import Path
 from typing import Optional, Dict, Any, Tuple
@@ -14,10 +20,10 @@ from data_engineering.patient_data_ingestion import load_patient_data
 # Logging
 # ---------------------------------------------------------------------
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s"
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
+
 
 # ---------------------------------------------------------------------
 # Patient Summary Statistics
@@ -57,42 +63,50 @@ class PatientSummaryStatistics:
         logger.info(f"Available columns: {', '.join(df.columns)}")
 
         # Verify required columns exist
-        required_cols = ['periodend', 'service_line', 'providercodecurrent']
+        required_cols = ["periodend", "service_line", "providercodecurrent"]
         missing_cols = [col for col in required_cols if col not in df.columns]
         if missing_cols:
             raise ValueError(f"Missing required columns: {missing_cols}")
 
         summary = {
-            'generation_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            'total_records': len(df),
-            'date_range': {
-                'start': df['periodend'].min(),
-                'end': df['periodend'].max(),
-                'months': df['periodend'].nunique()
+            "generation_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "total_records": len(df),
+            "date_range": {
+                "start": df["periodend"].min(),
+                "end": df["periodend"].max(),
+                "months": df["periodend"].nunique(),
             },
-            'dimensions': {
-                'service_lines': df['service_line'].nunique(),
-                'providers': df['providercodecurrent'].nunique()
+            "dimensions": {
+                "service_lines": df["service_line"].nunique(),
+                "providers": df["providercodecurrent"].nunique(),
             },
-            'key_metrics': {
-                'total_referrals': int(df['referrals'].sum()),
-                'total_clock_stops': int(df['clockstopactuals'].sum()),
-                'total_waiters': int(df['waiters'].sum()),
-                'waiters_18plus': int(df['waiters18plusweeks'].sum()),
-                'waiters_under_18': int(df['waitersunder18weeks'].sum()),
-                'total_caseload': int(df['caseload'].sum()),
-                'total_contacts': int(df['totalcontacts'].sum()),
-                'ftf_contacts': int(df['ftfcontacts'].sum()),
-                'discharges_with_clock_stop': int(df['dischargesfromcaseload'].sum()),
-                'discharges_no_clock_stop': int(df['dischargesnoclockstop'].sum())
+            "key_metrics": {
+                "total_referrals": int(df["referrals"].sum()),
+                "total_clock_stops": int(df["clockstopactuals"].sum()),
+                "total_waiters": int(df["waiters"].sum()),
+                "waiters_18plus": int(df["waiters18plusweeks"].sum()),
+                "waiters_under_18": int(df["waitersunder18weeks"].sum()),
+                "total_caseload": int(df["caseload"].sum()),
+                "total_contacts": int(df["totalcontacts"].sum()),
+                "ftf_contacts": int(df["ftfcontacts"].sum()),
+                "discharges_with_clock_stop": int(df["dischargesfromcaseload"].sum()),
+                "discharges_no_clock_stop": int(df["dischargesnoclockstop"].sum()),
             },
-            'average_metrics': {
-                'avg_length_of_treatment': float(df['averagelengthoftreatment'].mean()),
-                'avg_contacts_at_discharge': float(df['averagecontactsatdischarge'].mean()),
-                'avg_ftf_contacts_at_discharge': float(df['averageftfcontactsatdischarge'].mean()),
-                'avg_referral_clock_stop_ratio': float(df['referralclockstopratio'].mean()),
-                'avg_contacts_per_caseload': float(df['totalcontactspercaseload'].mean())
-            }
+            "average_metrics": {
+                "avg_length_of_treatment": float(df["averagelengthoftreatment"].mean()),
+                "avg_contacts_at_discharge": float(
+                    df["averagecontactsatdischarge"].mean()
+                ),
+                "avg_ftf_contacts_at_discharge": float(
+                    df["averageftfcontactsatdischarge"].mean()
+                ),
+                "avg_referral_clock_stop_ratio": float(
+                    df["referralclockstopratio"].mean()
+                ),
+                "avg_contacts_per_caseload": float(
+                    df["totalcontactspercaseload"].mean()
+                ),
+            },
         }
 
         logger.info("✅ Summary statistics generated.")
@@ -114,25 +128,27 @@ class PatientSummaryStatistics:
         logger.info("📋 Generating service line breakdown...")
 
         agg_dict = {
-            'referrals': 'sum',
-            'clockstopactuals': 'sum',
-            'waiters': 'sum',
-            'waiters18plusweeks': 'sum',
-            'caseload': 'sum',
-            'totalcontacts': 'sum',
-            'ftfcontacts': 'sum',
-            'averagelengthoftreatment': 'mean',
-            'averagecontactsatdischarge': 'mean'
+            "referrals": "sum",
+            "clockstopactuals": "sum",
+            "waiters": "sum",
+            "waiters18plusweeks": "sum",
+            "caseload": "sum",
+            "totalcontacts": "sum",
+            "ftfcontacts": "sum",
+            "averagelengthoftreatment": "mean",
+            "averagecontactsatdischarge": "mean",
         }
 
         service_breakdown = (
-            df.groupby('service_line', dropna=False)
+            df.groupby("service_line", dropna=False)
             .agg(agg_dict)
             .round(2)
-            .sort_values('referrals', ascending=False)
+            .sort_values("referrals", ascending=False)
         )
 
-        logger.info(f"✅ Breakdown generated for {len(service_breakdown)} service lines.")
+        logger.info(
+            f"✅ Breakdown generated for {len(service_breakdown)} service lines."
+        )
         return service_breakdown
 
     # -----------------------------------------------------------------
@@ -151,21 +167,16 @@ class PatientSummaryStatistics:
         logger.info("📈 Generating time series summary...")
 
         agg_dict = {
-            'referrals': 'sum',
-            'clockstopactuals': 'sum',
-            'waiters': 'sum',
-            'waiters18plusweeks': 'sum',
-            'caseload': 'sum',
-            'totalcontacts': 'sum',
-            'ftfcontacts': 'sum'
+            "referrals": "sum",
+            "clockstopactuals": "sum",
+            "waiters": "sum",
+            "waiters18plusweeks": "sum",
+            "caseload": "sum",
+            "totalcontacts": "sum",
+            "ftfcontacts": "sum",
         }
 
-        time_series = (
-            df.groupby('periodend')
-            .agg(agg_dict)
-            .round(2)
-            .sort_index()
-        )
+        time_series = df.groupby("periodend").agg(agg_dict).round(2).sort_index()
 
         logger.info(f"✅ Time series generated for {len(time_series)} periods.")
         return time_series
@@ -195,7 +206,9 @@ class PatientSummaryStatistics:
         lines.append("DATASET OVERVIEW")
         lines.append("-" * 80)
         lines.append(f"Total Records: {summary['total_records']:,}")
-        lines.append(f"Date Range: {summary['date_range']['start']} to {summary['date_range']['end']}")
+        lines.append(
+            f"Date Range: {summary['date_range']['start']} to {summary['date_range']['end']}"
+        )
         lines.append(f"Number of Months: {summary['date_range']['months']}")
         lines.append(f"Service Lines: {summary['dimensions']['service_lines']}")
         lines.append(f"Providers: {summary['dimensions']['providers']}")
@@ -203,13 +216,13 @@ class PatientSummaryStatistics:
 
         lines.append("KEY METRICS (TOTALS)")
         lines.append("-" * 80)
-        for metric, value in summary['key_metrics'].items():
+        for metric, value in summary["key_metrics"].items():
             lines.append(f"{metric.replace('_', ' ').title()}: {value:,}")
 
         lines.append("")
         lines.append("AVERAGE METRICS")
         lines.append("-" * 80)
-        for metric, value in summary['average_metrics'].items():
+        for metric, value in summary["average_metrics"].items():
             lines.append(f"{metric.replace('_', ' ').title()}: {value:.2f}")
 
         lines.append("")
@@ -233,9 +246,7 @@ class PatientSummaryStatistics:
     # Orchestrator
     # -----------------------------------------------------------------
     def generate_all_statistics(
-            self,
-            df: pd.DataFrame,
-            print_summary: bool = True
+        self, df: pd.DataFrame, print_summary: bool = True
     ) -> Tuple[Dict[str, Any], pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         """
         Generate all summary statistics.
@@ -258,6 +269,7 @@ class PatientSummaryStatistics:
 
         return summary, service_breakdown, time_series
 
+
 # ---------------------------------------------------------------------
 # Main Execution
 # ---------------------------------------------------------------------
@@ -272,8 +284,8 @@ def main():
         stats = PatientSummaryStatistics()
 
         # Generate all statistics
-        summary, service_breakdown, provider_breakdown, time_series = stats.generate_all_statistics(
-            df, print_summary=True
+        summary, service_breakdown, provider_breakdown, time_series = (
+            stats.generate_all_statistics(df, print_summary=True)
         )
 
         logger.info("🎉 Summary statistics generated successfully!")
@@ -300,7 +312,9 @@ def main():
 
     except FileNotFoundError as e:
         logger.error(f"❌ Data file not found: {e}")
-        logger.info("💡 Please run patient_data_ingestion.py first to generate the data file.")
+        logger.info(
+            "💡 Please run patient_data_ingestion.py first to generate the data file."
+        )
     except ValueError as e:
         logger.error(f"❌ Data validation error: {e}")
     except Exception:
