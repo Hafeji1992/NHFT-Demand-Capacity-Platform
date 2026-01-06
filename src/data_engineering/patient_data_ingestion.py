@@ -7,6 +7,7 @@ Extracts patient demand metrics from SQL Server and writes a cleaned CSV for ana
 import logging
 from pathlib import Path
 from typing import Optional, Dict, List, Tuple
+from datetime import date, timedelta
 import pandas as pd
 from tqdm import tqdm
 
@@ -35,6 +36,26 @@ class DataQualityException(Exception):
 # ---------------------------------------------------------------------
 class PatientDataExtractor:
     """Extracts patient data from SQL Server and saves to CSV."""
+
+    @staticmethod
+    def get_last_full_month_end(reference_date: Optional[date] = None) -> pd.Timestamp:
+        """Return the last day of the most recently completed month.
+
+        Example:
+            If today is 2026-01-06, this returns 2025-12-31.
+
+        Args:
+            reference_date: Optional date to compute the cutoff from. Defaults to today.
+
+        Returns:
+            A pandas Timestamp representing the previous month-end.
+        """
+        if reference_date is None:
+            reference_date = date.today()
+
+        first_of_month = reference_date.replace(day=1)
+        last_day_previous_month = first_of_month - timedelta(days=1)
+        return pd.Timestamp(last_day_previous_month)
 
     # SQL query as class constant for better maintainability
     PATIENT_QUERY = """
@@ -670,6 +691,20 @@ class PatientDataExtractor:
             # Convert periodend to datetime
             if "periodend" in df.columns:
                 df["periodend"] = pd.to_datetime(df["periodend"])
+
+                # Cap to last fully completed month (prevents partial-month leakage)
+                cutoff = self.get_last_full_month_end()
+                before_rows = len(df)
+                df = df[df["periodend"].notna() & (df["periodend"] <= cutoff)]
+                removed = before_rows - len(df)
+
+                if removed > 0:
+                    logger.info(
+                        f"📅 Applied month-end cutoff at {cutoff.date()}: removed {removed:,} row(s)"
+                    )
+                logger.info(
+                    f"📅 Max periodend in extracted dataset: {df['periodend'].max().date() if not df.empty else 'N/A'}"
+                )
 
             logger.info(f"✅ Retrieved {len(df):,} rows from source views.")
             logger.info(

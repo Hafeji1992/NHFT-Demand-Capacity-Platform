@@ -19,9 +19,27 @@
   - MIS_AG.dbo.Vw_tbl_ag_Report_ContactAttendances
   - MIS_Config.dbo.tbl_org_current_RL9_Service_Line  
 - **Refresh cadence:** Monthly (aligned to MIS reporting refresh).  
+- **Ingestion cutoff (time series safety):** Patient data ingestion is capped at the **last fully completed month-end** to avoid partial-month periods in downstream time series analysis.  
+  Example: If run on `2026-01-06`, the maximum `periodend` included will be `2025-12-31`.  
 - **Storage location:** `data/patient_data.csv` (excluded from version control).  
 - **Sensitivity classification:**  
   Aggregated operational activity data. No direct patient identifiers. Managed under NHFT Information Governance standards.
+
+---
+
+# Running Ingestion (Master Script)
+
+Use the master runner to refresh both patient and staffing datasets and update `data/last_refreshed.json`:
+
+```bash
+python src/data_engineering/master_data_ingestion.py
+```
+
+Optional flags:
+- `--skip-patient` / `--skip-staffing`
+- `--no-quality-checks`
+- `--config PATH_TO_CONFIG_INI`
+- `--output-dir PATH_TO_DATA_DIR`
 
 ---
 

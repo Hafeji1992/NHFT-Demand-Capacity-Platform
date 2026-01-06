@@ -14,8 +14,7 @@ import numpy as np
 # Logging Configuration
 # ---------------------------------------------------------------------
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s"
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
@@ -69,10 +68,7 @@ class DataHandler:
 
         logger.info(f"📂 Loading patient data from: {filepath}")
 
-        self.patient_df = pd.read_csv(
-            filepath,
-            parse_dates=["periodend"]
-        )
+        self.patient_df = pd.read_csv(filepath, parse_dates=["periodend"])
 
         logger.info(f"✅ Loaded {len(self.patient_df):,} patient records")
 
@@ -119,7 +115,9 @@ class DataHandler:
     # -----------------------------------------------------------------
     # Data Preprocessing Methods
     # -----------------------------------------------------------------
-    def preprocess_patient_data(self, df: Optional[pd.DataFrame] = None) -> pd.DataFrame:
+    def preprocess_patient_data(
+        self, df: Optional[pd.DataFrame] = None
+    ) -> pd.DataFrame:
         """
         Preprocess patient data for dashboard use.
 
@@ -131,30 +129,34 @@ class DataHandler:
         """
         if df is None:
             if self.patient_df is None:
-                raise ValueError("No patient data loaded. Call load_patient_data() first.")
+                raise ValueError(
+                    "No patient data loaded. Call load_patient_data() first."
+                )
             df = self.patient_df.copy()
         else:
             df = df.copy()
 
         # Ensure periodend is datetime
-        if not pd.api.types.is_datetime64_any_dtype(df['periodend']):
-            df['periodend'] = pd.to_datetime(df['periodend'])
+        if not pd.api.types.is_datetime64_any_dtype(df["periodend"]):
+            df["periodend"] = pd.to_datetime(df["periodend"])
 
         # Extract temporal features
-        df['year'] = df['periodend'].dt.year
-        df['month'] = df['periodend'].dt.month
-        df['month_name'] = df['periodend'].dt.strftime('%b')
-        df['quarter'] = df['periodend'].dt.quarter
-        df['year_month'] = df['periodend'].dt.to_period('M').astype(str)
+        df["year"] = df["periodend"].dt.year
+        df["month"] = df["periodend"].dt.month
+        df["month_name"] = df["periodend"].dt.strftime("%b")
+        df["quarter"] = df["periodend"].dt.quarter
+        df["year_month"] = df["periodend"].dt.to_period("M").astype(str)
 
         # Sort by date
-        df = df.sort_values('periodend')
+        df = df.sort_values("periodend")
 
         logger.info("✅ Patient data preprocessed")
 
         return df
 
-    def preprocess_staffing_data(self, df: Optional[pd.DataFrame] = None) -> pd.DataFrame:
+    def preprocess_staffing_data(
+        self, df: Optional[pd.DataFrame] = None
+    ) -> pd.DataFrame:
         """
         Preprocess staffing data for dashboard use.
 
@@ -166,16 +168,18 @@ class DataHandler:
         """
         if df is None:
             if self.staffing_df is None:
-                raise ValueError("No staffing data loaded. Call load_staffing_data() first.")
+                raise ValueError(
+                    "No staffing data loaded. Call load_staffing_data() first."
+                )
             df = self.staffing_df.copy()
         else:
             df = df.copy()
 
         # Ensure consistent data types
-        df['staff'] = pd.to_numeric(df['staff'], errors='coerce')
+        df["staff"] = pd.to_numeric(df["staff"], errors="coerce")
 
         # Remove any rows with null staff counts
-        df = df.dropna(subset=['staff'])
+        df = df.dropna(subset=["staff"])
 
         logger.info("✅ Staffing data preprocessed")
 
@@ -200,17 +204,15 @@ class DataHandler:
         logger.info("🔗 Merging patient and staffing datasets...")
 
         # Aggregate staffing by provider and service line
-        staffing_agg = self.staffing_df.groupby(
-            ['providercodecurrent', 'service_line']
-        ).agg({
-            'staff': 'sum'
-        }).reset_index()
+        staffing_agg = (
+            self.staffing_df.groupby(["providercodecurrent", "service_line"])
+            .agg({"staff": "sum"})
+            .reset_index()
+        )
 
         # Merge with patient data
         self.merged_df = self.patient_df.merge(
-            staffing_agg,
-            on=['providercodecurrent', 'service_line'],
-            how='left'
+            staffing_agg, on=["providercodecurrent", "service_line"], how="left"
         )
 
         logger.info(f"✅ Merged dataset contains {len(self.merged_df):,} records")
@@ -221,10 +223,10 @@ class DataHandler:
     # Data Filtering Methods
     # -----------------------------------------------------------------
     def filter_by_date_range(
-            self,
-            df: pd.DataFrame,
-            start_date: Optional[str] = None,
-            end_date: Optional[str] = None
+        self,
+        df: pd.DataFrame,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
     ) -> pd.DataFrame:
         """
         Filter DataFrame by date range.
@@ -237,23 +239,21 @@ class DataHandler:
         Returns:
             Filtered DataFrame
         """
-        if 'periodend' not in df.columns:
+        if "periodend" not in df.columns:
             raise ValueError("DataFrame must have 'periodend' column")
 
         filtered = df.copy()
 
         if start_date:
-            filtered = filtered[filtered['periodend'] >= pd.to_datetime(start_date)]
+            filtered = filtered[filtered["periodend"] >= pd.to_datetime(start_date)]
 
         if end_date:
-            filtered = filtered[filtered['periodend'] <= pd.to_datetime(end_date)]
+            filtered = filtered[filtered["periodend"] <= pd.to_datetime(end_date)]
 
         return filtered
 
     def filter_by_provider(
-            self,
-            df: pd.DataFrame,
-            providers: List[str]
+        self, df: pd.DataFrame, providers: List[str]
     ) -> pd.DataFrame:
         """
         Filter DataFrame by provider codes.
@@ -268,12 +268,10 @@ class DataHandler:
         if not providers:
             return df
 
-        return df[df['providercodecurrent'].isin(providers)]
+        return df[df["providercodecurrent"].isin(providers)]
 
     def filter_by_service_line(
-            self,
-            df: pd.DataFrame,
-            service_lines: List[str]
+        self, df: pd.DataFrame, service_lines: List[str]
     ) -> pd.DataFrame:
         """
         Filter DataFrame by service lines.
@@ -288,16 +286,13 @@ class DataHandler:
         if not service_lines:
             return df
 
-        return df[df['service_line'].isin(service_lines)]
+        return df[df["service_line"].isin(service_lines)]
 
     # -----------------------------------------------------------------
     # Data Aggregation Methods
     # -----------------------------------------------------------------
     def aggregate_by_period(
-            self,
-            df: pd.DataFrame,
-            metrics: List[str],
-            period: str = 'month'
+        self, df: pd.DataFrame, metrics: List[str], period: str = "month"
     ) -> pd.DataFrame:
         """
         Aggregate metrics by time period.
@@ -310,12 +305,12 @@ class DataHandler:
         Returns:
             Aggregated DataFrame
         """
-        if period == 'month':
-            group_col = 'year_month'
-        elif period == 'quarter':
-            group_col = 'quarter'
-        elif period == 'year':
-            group_col = 'year'
+        if period == "month":
+            group_col = "year_month"
+        elif period == "quarter":
+            group_col = "quarter"
+        elif period == "year":
+            group_col = "year"
         else:
             raise ValueError(f"Invalid period: {period}")
 
@@ -323,14 +318,12 @@ class DataHandler:
         if group_col not in df.columns:
             df = self.preprocess_patient_data(df)
 
-        agg_dict = {metric: 'sum' for metric in metrics if metric in df.columns}
+        agg_dict = {metric: "sum" for metric in metrics if metric in df.columns}
 
         return df.groupby(group_col).agg(agg_dict).reset_index()
 
     def aggregate_by_service_line(
-            self,
-            df: pd.DataFrame,
-            metrics: List[str]
+        self, df: pd.DataFrame, metrics: List[str]
     ) -> pd.DataFrame:
         """
         Aggregate metrics by service line.
@@ -342,9 +335,9 @@ class DataHandler:
         Returns:
             Aggregated DataFrame
         """
-        agg_dict = {metric: 'sum' for metric in metrics if metric in df.columns}
+        agg_dict = {metric: "sum" for metric in metrics if metric in df.columns}
 
-        return df.groupby('service_line').agg(agg_dict).reset_index()
+        return df.groupby("service_line").agg(agg_dict).reset_index()
 
     # -----------------------------------------------------------------
     # Getter Methods for Dashboard
@@ -357,7 +350,7 @@ class DataHandler:
         if df is None:
             return []
 
-        return sorted(df['providercodecurrent'].dropna().unique().tolist())
+        return sorted(df["providercodecurrent"].dropna().unique().tolist())
 
     def get_unique_service_lines(self, df: Optional[pd.DataFrame] = None) -> List[str]:
         """Get list of unique service lines."""
@@ -367,18 +360,18 @@ class DataHandler:
         if df is None:
             return []
 
-        return sorted(df['service_line'].dropna().unique().tolist())
+        return sorted(df["service_line"].dropna().unique().tolist())
 
     def get_date_range(self, df: Optional[pd.DataFrame] = None) -> Tuple[str, str]:
         """Get min and max dates from patient data."""
         if df is None:
             df = self.patient_df
 
-        if df is None or 'periodend' not in df.columns:
+        if df is None or "periodend" not in df.columns:
             return None, None
 
-        min_date = df['periodend'].min().strftime('%Y-%m-%d')
-        max_date = df['periodend'].max().strftime('%Y-%m-%d')
+        min_date = df["periodend"].min().strftime("%Y-%m-%d")
+        max_date = df["periodend"].max().strftime("%Y-%m-%d")
 
         return min_date, max_date
 
@@ -399,20 +392,22 @@ class DataHandler:
             return {}
 
         # Get latest period data
-        latest_period = df['periodend'].max()
-        latest_data = df[df['periodend'] == latest_period]
+        latest_period = df["periodend"].max()
+        latest_data = df[df["periodend"] == latest_period]
 
         summary = {
-            'total_referrals': int(latest_data['referrals'].sum()),
-            'total_waiters': int(latest_data['waiters'].sum()),
-            'total_caseload': int(latest_data['caseload'].sum()),
-            'total_contacts': int(latest_data['totalcontacts'].sum()),
-            'avg_wait_18plus_pct': (
-                latest_data['waiters18plusweeks'].sum() /
-                latest_data['waiters'].sum() * 100
-                if latest_data['waiters'].sum() > 0 else 0
+            "total_referrals": int(latest_data["referrals"].sum()),
+            "total_waiters": int(latest_data["waiters"].sum()),
+            "total_caseload": int(latest_data["caseload"].sum()),
+            "total_contacts": int(latest_data["totalcontacts"].sum()),
+            "avg_wait_18plus_pct": (
+                latest_data["waiters18plusweeks"].sum()
+                / latest_data["waiters"].sum()
+                * 100
+                if latest_data["waiters"].sum() > 0
+                else 0
             ),
-            'latest_period': latest_period.strftime('%Y-%m-%d')
+            "latest_period": latest_period.strftime("%Y-%m-%d"),
         }
 
         return summary
