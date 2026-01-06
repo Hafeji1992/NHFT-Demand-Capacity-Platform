@@ -91,7 +91,7 @@ def create_filter_section():
         )
         service_line_options = [
             {
-                "label": f"{row['service_line']}",
+                "label": f"{row['providercodecurrent']} - {row['service_line']}",
                 "value": f"{row['providercodecurrent']}|{row['service_line']}",
             }
             for _, row in service_line_data.iterrows()
@@ -514,8 +514,9 @@ def create_overview_tab(df):
 
 
 def create_service_line_summary_table(df: pd.DataFrame):
-    """Create the service line summary DataTable (used in the Demand tab)."""
+    """Create the patient metrics summary table by provider code + service line."""
     exclude_cols = {
+        # Keep these as identifier columns rather than aggregated numeric metrics
         "providercodecurrent",
         "service_line",
         "periodend",
@@ -531,7 +532,11 @@ def create_service_line_summary_table(df: pd.DataFrame):
     ]
 
     summary_df = (
-        df.groupby("service_line")[summary_columns].sum().reset_index().round(0)
+        df.groupby(["providercodecurrent", "service_line"])[summary_columns]
+        .sum()
+        .reset_index()
+        .round(0)
+        .sort_values(["providercodecurrent", "service_line"])
     )
 
     return dash_table.DataTable(
@@ -554,7 +559,7 @@ def create_staffing_pivot_table(
     patient_df: pd.DataFrame,
     staffing_df: Optional[pd.DataFrame],
 ):
-    """Create a staffing pivot table: rows=service_line, cols=staff_group, values=staff."""
+    """Create a staffing pivot table: rows=provider+service_line, cols=staff_group, values=staff."""
     if staffing_df is None or staffing_df.empty:
         return html.Div(
             "No staffing data available.",
@@ -598,16 +603,25 @@ def create_staffing_pivot_table(
     ).fillna(0)
 
     pivot_df = (
-        staffing_filtered.groupby(["service_line", "staff_group"], as_index=False)
+        staffing_filtered.groupby(
+            ["providercodecurrent", "service_line", "staff_group"], as_index=False
+        )
         .agg(staff=("staff", "sum"))
-        .pivot(index="service_line", columns="staff_group", values="staff")
+        .pivot(
+            index=["providercodecurrent", "service_line"],
+            columns="staff_group",
+            values="staff",
+        )
         .fillna(0)
         .reset_index()
     )
 
-    # Keep columns stable-ish: service_line first, then alphabetical staff groups
-    non_index_cols = [c for c in pivot_df.columns if c != "service_line"]
-    pivot_df = pivot_df[["service_line"] + sorted(non_index_cols, key=lambda x: str(x))]
+    # Keep columns stable-ish: identifiers first, then alphabetical staff groups
+    id_cols = ["providercodecurrent", "service_line"]
+    non_index_cols = [c for c in pivot_df.columns if c not in id_cols]
+    pivot_df = pivot_df[id_cols + sorted(non_index_cols, key=lambda x: str(x))]
+
+    pivot_df = pivot_df.sort_values(["providercodecurrent", "service_line"])
 
     # Render integers when possible
     for col in non_index_cols:
@@ -665,7 +679,7 @@ def create_demand_tab(df):
                 [
                     dbc.Col(
                         [
-                            html.H4("Service Line Summary", className="mb-3"),
+                            html.H4("Patients Data by Service Line", className="mb-3"),
                             summary_table,
                         ],
                         width=12,
@@ -686,18 +700,6 @@ def create_capacity_tab(df):
 
     return html.Div(
         [
-            dbc.Row(
-                [
-                    dbc.Col(
-                        [
-                            html.H4("Staffing by Service Line", className="mb-3"),
-                            staffing_table,
-                        ],
-                        width=12,
-                    ),
-                ],
-                className="mb-4",
-            ),
             dbc.Alert(
                 [
                     html.H4("💼 Capacity Analysis", className="alert-heading"),
@@ -716,6 +718,18 @@ def create_capacity_tab(df):
                 ],
                 color="info",
                 className="mt-4",
+            ),
+            dbc.Row(
+                [
+                    dbc.Col(
+                        [
+                            html.H4("Staffing by Service Line", className="mb-3"),
+                            staffing_table,
+                        ],
+                        width=12,
+                    ),
+                ],
+                className="mb-4",
             ),
         ]
     )
