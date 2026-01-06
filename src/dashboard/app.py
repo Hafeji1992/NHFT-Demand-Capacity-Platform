@@ -507,8 +507,25 @@ def create_overview_tab(df):
     )
 
     # -----------------------------
-    # Data summary table
+    # Layout
     # -----------------------------
+    return html.Div(
+        [
+            # Main time series chart
+            dbc.Row(
+                [
+                    dbc.Col(dcc.Graph(figure=fig_timeseries), width=12),
+                ],
+                className="mb-4",
+            ),
+            # Stacked 18-week bar chart
+            waiters_chart,
+        ]
+    )
+
+
+def create_service_line_summary_table(df: pd.DataFrame):
+    """Create the service line summary DataTable (used in the Demand tab)."""
     exclude_cols = {
         "providercodecurrent",
         "service_line",
@@ -528,16 +545,7 @@ def create_overview_tab(df):
         df.groupby("service_line")[summary_columns].sum().reset_index().round(0)
     )
 
-    summary_table = dbc.Table.from_dataframe(
-        summary_df,
-        striped=True,
-        bordered=True,
-        hover=True,
-        responsive=True,
-        class_name="sortable-table",
-    )
-
-    summary_table = dash_table.DataTable(
+    return dash_table.DataTable(
         data=summary_df.to_dict("records"),
         columns=[{"name": i, "id": i} for i in summary_df.columns],
         sort_action="native",
@@ -552,40 +560,95 @@ def create_overview_tab(df):
         ],
     )
 
-    # -----------------------------
-    # Layout
-    # -----------------------------
-    return html.Div(
-        [
-            # Main time series chart
-            dbc.Row(
-                [
-                    dbc.Col(dcc.Graph(figure=fig_timeseries), width=12),
-                ],
-                className="mb-4",
-            ),
-            # Stacked 18-week bar chart
-            waiters_chart,
-            # Data summary table
-            html.Hr(),
-            dbc.Row(
-                [
-                    dbc.Col(
-                        [
-                            html.H4("Service Line Summary", className="mb-3"),
-                            summary_table,
-                        ],
-                        width=12,
-                    ),
-                ],
-                className="mb-4",
-            ),
+
+def create_staffing_pivot_table(
+    patient_df: pd.DataFrame,
+    staffing_df: Optional[pd.DataFrame],
+):
+    """Create a staffing pivot table: rows=service_line, cols=staff_group, values=staff."""
+    if staffing_df is None or staffing_df.empty:
+        return html.Div(
+            "No staffing data available.",
+            className="alert alert-warning",
+        )
+
+    required_cols = {"service_line", "staff_group", "staff"}
+    if not required_cols.issubset(set(staffing_df.columns)):
+        missing = sorted(required_cols - set(staffing_df.columns))
+        return html.Div(
+            f"Staffing data is missing required columns: {', '.join(missing)}",
+            className="alert alert-danger",
+        )
+
+    selected_service_lines = []
+    if (
+        patient_df is not None
+        and not patient_df.empty
+        and "service_line" in patient_df.columns
+    ):
+        selected_service_lines = (
+            patient_df["service_line"].dropna().astype(str).unique().tolist()
+        )
+
+    staffing_filtered = staffing_df.copy()
+    if selected_service_lines:
+        staffing_filtered = staffing_filtered[
+            staffing_filtered["service_line"].astype(str).isin(selected_service_lines)
         ]
+
+    if staffing_filtered.empty:
+        return html.Div(
+            "No staffing rows match the selected service lines.",
+            className="alert alert-info",
+        )
+
+    staffing_filtered["staff"] = pd.to_numeric(
+        staffing_filtered["staff"], errors="coerce"
+    ).fillna(0)
+
+    pivot_df = (
+        staffing_filtered.groupby(["service_line", "staff_group"], as_index=False)
+        .agg(staff=("staff", "sum"))
+        .pivot(index="service_line", columns="staff_group", values="staff")
+        .fillna(0)
+        .reset_index()
+    )
+
+    # Keep columns stable-ish: service_line first, then alphabetical staff groups
+    non_index_cols = [c for c in pivot_df.columns if c != "service_line"]
+    pivot_df = pivot_df[["service_line"] + sorted(non_index_cols, key=lambda x: str(x))]
+
+    # Render integers when possible
+    for col in non_index_cols:
+        try:
+            pivot_df[col] = pivot_df[col].round(0).astype(int)
+        except Exception:
+            pivot_df[col] = pivot_df[col].round(0)
+
+    return dash_table.DataTable(
+        data=pivot_df.to_dict("records"),
+        columns=[{"name": str(i), "id": str(i)} for i in pivot_df.columns],
+        sort_action="native",
+        style_table={"overflowX": "auto"},
+        style_cell={
+            "textAlign": "left",
+            "padding": "10px",
+            "minWidth": "120px",
+            "maxWidth": "240px",
+            "whiteSpace": "normal",
+        },
+        style_header={"backgroundColor": "rgb(230, 230, 230)", "fontWeight": "bold"},
+        style_data_conditional=[
+            {"if": {"row_index": "odd"}, "backgroundColor": "rgb(248, 248, 248)"}
+        ],
     )
 
 
 def create_demand_tab(df):
-    """Create demand analysis tab content - stub for future development."""
+    """Create demand analysis tab content."""
+
+    summary_table = create_service_line_summary_table(df)
+
     return html.Div(
         [
             dbc.Alert(
@@ -606,15 +669,44 @@ def create_demand_tab(df):
                 ],
                 color="info",
                 className="mt-4",
-            )
+            ),
+            dbc.Row(
+                [
+                    dbc.Col(
+                        [
+                            html.H4("Service Line Summary", className="mb-3"),
+                            summary_table,
+                        ],
+                        width=12,
+                    ),
+                ],
+                className="mb-4",
+            ),
         ]
     )
 
 
 def create_capacity_tab(df):
     """Create capacity analysis tab content - stub for future development."""
+    if data_handler is None:
+        return html.Div("Data not available", className="alert alert-danger")
+
+    staffing_table = create_staffing_pivot_table(df, data_handler.staffing_df)
+
     return html.Div(
         [
+            dbc.Row(
+                [
+                    dbc.Col(
+                        [
+                            html.H4("Staffing by Service Line", className="mb-3"),
+                            staffing_table,
+                        ],
+                        width=12,
+                    ),
+                ],
+                className="mb-4",
+            ),
             dbc.Alert(
                 [
                     html.H4("💼 Capacity Analysis", className="alert-heading"),
@@ -633,7 +725,7 @@ def create_capacity_tab(df):
                 ],
                 color="info",
                 className="mt-4",
-            )
+            ),
         ]
     )
 
