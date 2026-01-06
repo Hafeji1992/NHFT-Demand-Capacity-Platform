@@ -386,7 +386,7 @@ def create_overview_tab(df):
     """Create overview tab content."""
 
     # -----------------------------
-    # Time series chart
+    # Key Metrics (Time series chart)
     # -----------------------------
     df_sorted = df.sort_values("periodend")
 
@@ -456,81 +456,55 @@ def create_overview_tab(df):
     # -----------------------------
     # 18-week waiters split (stacked bar)
     # -----------------------------
-    # Check which column names actually exist
-    under_18_col = None
-    over_18_col = None
+    waiters_18wk = df_sorted.groupby("year_month", as_index=False).agg(
+        waitersunder18weeks=("waitersunder18weeks", "sum"),
+        waiters18plusweeks=("waiters18plusweeks", "sum"),
+    )
 
-    # Try different possible column name variations
-    if "waitersunder18weeks" in df_sorted.columns:
-        under_18_col = "waitersunder18weeks"
-    elif "waiters<18weeks" in df_sorted.columns:
-        under_18_col = "waiters<18weeks"
+    fig_18wk = go.Figure()
 
-    if "waiters18plusweeks" in df_sorted.columns:
-        over_18_col = "waiters18plusweeks"
-    elif "waiters18+weeks" in df_sorted.columns:
-        over_18_col = "waiters18+weeks"
-
-    # Only create the chart if we have the required columns
-    if under_18_col and over_18_col:
-        waiters_18wk = (
-            df_sorted.groupby("year_month")
-            .agg(
-                {
-                    under_18_col: "sum",
-                    over_18_col: "sum",
-                }
-            )
-            .reset_index()
+    fig_18wk.add_trace(
+        go.Bar(
+            x=waiters_18wk["year_month"],
+            y=waiters_18wk["waitersunder18weeks"],
+            name="Under 18 Weeks",
+            marker_color="#636EFA",  # Plotly blue
         )
+    )
 
-        fig_18wk = go.Figure()
-
-        fig_18wk.add_trace(
-            go.Bar(
-                x=waiters_18wk["year_month"],
-                y=waiters_18wk[under_18_col],
-                name="Under 18 Weeks",
-                marker_color="#636EFA",  # Plotly blue (matches time series)
-            )
+    fig_18wk.add_trace(
+        go.Bar(
+            x=waiters_18wk["year_month"],
+            y=waiters_18wk["waiters18plusweeks"],
+            name="18+ Weeks",
+            marker_color="#EF553B",  # Plotly red
         )
+    )
 
-        fig_18wk.add_trace(
-            go.Bar(
-                x=waiters_18wk["year_month"],
-                y=waiters_18wk[over_18_col],
-                name="18+ Weeks",
-                marker_color="#EF553B",  # Plotly red (matches time series)
-            )
-        )
+    fig_18wk.update_layout(
+        title="Waiting List Breakdown: Under vs Over 18 Weeks",
+        xaxis_title="Period",
+        yaxis_title="Number of Waiters",
+        barmode="stack",
+        height=400,
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1,
+        ),
+    )
 
-        fig_18wk.update_layout(
-            title="Waiting List Breakdown: Under vs Over 18 Weeks",
-            xaxis_title="Period",
-            yaxis_title="Number of Waiters",
-            barmode="stack",
-            height=400,
-            legend=dict(
-                orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1
+    waiters_chart = dbc.Row(
+        [
+            dbc.Col(
+                dcc.Graph(figure=fig_18wk),
+                width=12,
             ),
-        )
-
-        waiters_chart = dbc.Row(
-            [
-                dbc.Col(
-                    dcc.Graph(figure=fig_18wk),
-                    width=12,
-                ),
-            ],
-            className="mb-4",
-        )
-    else:
-        # Fallback if columns don't exist
-        waiters_chart = dbc.Alert(
-            f"18-week waiter breakdown not available. Available columns: {', '.join(df.columns)}",
-            color="warning",
-            className="mb-4",
-        )
+        ],
+        className="mb-4",
+    )
 
     # -----------------------------
     # Data summary table
@@ -542,8 +516,6 @@ def create_overview_tab(df):
         "year",
         "month",
         "quarter",
-        "year_month",
-        "month_name",
     }
 
     summary_columns = [
