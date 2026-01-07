@@ -5,7 +5,6 @@ Interactive Dash application for visualising demand and capacity data.
 """
 
 import logging
-from pathlib import Path
 from typing import Optional
 from io import StringIO
 
@@ -51,6 +50,44 @@ app = dash.Dash(
 # ---------------------------------------------------------------------
 # Helper Functions
 # ---------------------------------------------------------------------
+def prettify_column_name(column_id: str) -> str:
+    """Format column headers into user-friendly table headers.
+
+    Rules:
+    - Converts snake_case / kebab-case into spaced words.
+    - Title-cases human-entered headers too (e.g., "referral contacts" -> "Referral Contacts").
+    - Uppercases 3-letter alphabetic tokens to preserve acronyms (e.g., ftf -> FTF).
+    - Preserves already-uppercase tokens (e.g., NHS, WTE).
+    """
+
+    raw = str(column_id)
+    normalised = raw.replace("_", " ").replace("-", " ")
+    parts: list[str] = [p for p in normalised.split() if p]
+
+    pretty_parts: list[str] = []
+    for part in parts:
+        if part.isdigit():
+            pretty_parts.append(part)
+            continue
+
+        if part.isalpha():
+            if part.isupper():
+                pretty_parts.append(part)
+                continue
+
+            if len(part) == 3:
+                pretty_parts.append(part.upper())
+                continue
+
+            pretty_parts.append(part[:1].upper() + part[1:].lower())
+            continue
+
+        # For tokens with punctuation (e.g., "A/B"), leave unchanged.
+        pretty_parts.append(part)
+
+    return " ".join(pretty_parts)
+
+
 def create_metric_card(
     title: str, value: str, icon: str = "📊", color: str = "primary"
 ):
@@ -689,15 +726,41 @@ def create_service_line_summary_table(df: pd.DataFrame):
     )
 
     return dash_table.DataTable(
+        id="patient-summary-table",
         data=summary_df.to_dict("records"),
-        columns=[{"name": i, "id": i} for i in summary_df.columns],
+        columns=[
+            {"name": prettify_column_name(i), "id": i} for i in summary_df.columns
+        ],
+        fixed_rows={"headers": True},
+        fixed_columns={"headers": True, "data": 2},
         sort_action="native",
-        style_table={"overflowX": "auto"},
+        style_table={
+            "width": "100%",
+            "minWidth": "100%",
+            "overflowX": "auto",
+            "maxHeight": "520px",
+            "overflowY": "auto",
+        },
         style_cell={
             "textAlign": "left",
             "padding": "10px",
+            "minWidth": "120px",
+            "maxWidth": "240px",
+            "whiteSpace": "normal",
         },
-        style_header={"backgroundColor": "rgb(230, 230, 230)", "fontWeight": "bold"},
+        style_cell_conditional=[
+            {
+                "if": {"column_id": "service_line"},
+                "minWidth": "180px",
+                "maxWidth": "320px",
+            }
+        ],
+        style_header={
+            "backgroundColor": "rgb(230, 230, 230)",
+            "fontWeight": "bold",
+            "whiteSpace": "normal",
+            "height": "auto",
+        },
         style_data_conditional=[
             {"if": {"row_index": "odd"}, "backgroundColor": "rgb(248, 248, 248)"}
         ],
@@ -789,10 +852,29 @@ def create_staffing_pivot_table(
             pivot_df[col] = pivot_df[col].round(0)
 
     return dash_table.DataTable(
+        id="staffing-pivot-table",
         data=pivot_df.to_dict("records"),
-        columns=[{"name": str(i), "id": str(i)} for i in pivot_df.columns],
+        columns=[
+            {
+                "name": (
+                    prettify_column_name(str(i))
+                    if str(i) in {"provider_code_current", "service_line"}
+                    else str(i)
+                ),
+                "id": str(i),
+            }
+            for i in pivot_df.columns
+        ],
+        fixed_rows={"headers": True},
+        fixed_columns={"headers": True, "data": 2},
         sort_action="native",
-        style_table={"overflowX": "auto"},
+        style_table={
+            "width": "100%",
+            "minWidth": "100%",
+            "overflowX": "auto",
+            "maxHeight": "520px",
+            "overflowY": "auto",
+        },
         style_cell={
             "textAlign": "left",
             "padding": "10px",
@@ -800,7 +882,19 @@ def create_staffing_pivot_table(
             "maxWidth": "240px",
             "whiteSpace": "normal",
         },
-        style_header={"backgroundColor": "rgb(230, 230, 230)", "fontWeight": "bold"},
+        style_cell_conditional=[
+            {
+                "if": {"column_id": "service_line"},
+                "minWidth": "180px",
+                "maxWidth": "320px",
+            }
+        ],
+        style_header={
+            "backgroundColor": "rgb(230, 230, 230)",
+            "fontWeight": "bold",
+            "whiteSpace": "normal",
+            "height": "auto",
+        },
         style_data_conditional=[
             {"if": {"row_index": "odd"}, "backgroundColor": "rgb(248, 248, 248)"}
         ],
