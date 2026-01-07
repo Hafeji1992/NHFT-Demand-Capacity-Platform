@@ -68,7 +68,8 @@ class DataHandler:
 
         logger.info(f"📂 Loading patient data from: {filepath}")
 
-        self.patient_df = pd.read_csv(filepath, parse_dates=["periodend"])
+        # Patient ingestion outputs snake_case columns
+        self.patient_df = pd.read_csv(filepath, parse_dates=["period_end"])
 
         logger.info(f"✅ Loaded {len(self.patient_df):,} patient records")
 
@@ -137,18 +138,18 @@ class DataHandler:
             df = df.copy()
 
         # Ensure periodend is datetime
-        if not pd.api.types.is_datetime64_any_dtype(df["periodend"]):
-            df["periodend"] = pd.to_datetime(df["periodend"])
+        if not pd.api.types.is_datetime64_any_dtype(df["period_end"]):
+            df["period_end"] = pd.to_datetime(df["period_end"])
 
         # Extract temporal features
-        df["year"] = df["periodend"].dt.year
-        df["month"] = df["periodend"].dt.month
-        df["month_name"] = df["periodend"].dt.strftime("%b")
-        df["quarter"] = df["periodend"].dt.quarter
-        df["year_month"] = df["periodend"].dt.to_period("M").astype(str)
+        df["year"] = df["period_end"].dt.year
+        df["month"] = df["period_end"].dt.month
+        df["month_name"] = df["period_end"].dt.strftime("%b")
+        df["quarter"] = df["period_end"].dt.quarter
+        df["year_month"] = df["period_end"].dt.to_period("M").astype(str)
 
         # Sort by date
-        df = df.sort_values("periodend")
+        df = df.sort_values("period_end")
 
         logger.info("✅ Patient data preprocessed")
 
@@ -205,14 +206,14 @@ class DataHandler:
 
         # Aggregate staffing by provider and service line
         staffing_agg = (
-            self.staffing_df.groupby(["providercodecurrent", "service_line"])
+            self.staffing_df.groupby(["provider_code_current", "service_line"])
             .agg({"staff": "sum"})
             .reset_index()
         )
 
         # Merge with patient data
         self.merged_df = self.patient_df.merge(
-            staffing_agg, on=["providercodecurrent", "service_line"], how="left"
+            staffing_agg, on=["provider_code_current", "service_line"], how="left"
         )
 
         logger.info(f"✅ Merged dataset contains {len(self.merged_df):,} records")
@@ -239,16 +240,16 @@ class DataHandler:
         Returns:
             Filtered DataFrame
         """
-        if "periodend" not in df.columns:
-            raise ValueError("DataFrame must have 'periodend' column")
+        if "period_end" not in df.columns:
+            raise ValueError("DataFrame must have 'period_end' column")
 
         filtered = df.copy()
 
         if start_date:
-            filtered = filtered[filtered["periodend"] >= pd.to_datetime(start_date)]
+            filtered = filtered[filtered["period_end"] >= pd.to_datetime(start_date)]
 
         if end_date:
-            filtered = filtered[filtered["periodend"] <= pd.to_datetime(end_date)]
+            filtered = filtered[filtered["period_end"] <= pd.to_datetime(end_date)]
 
         return filtered
 
@@ -268,7 +269,7 @@ class DataHandler:
         if not providers:
             return df
 
-        return df[df["providercodecurrent"].isin(providers)]
+        return df[df["provider_code_current"].isin(providers)]
 
     def filter_by_service_line(
         self, df: pd.DataFrame, service_lines: List[str]
@@ -350,7 +351,7 @@ class DataHandler:
         if df is None:
             return []
 
-        return sorted(df["providercodecurrent"].dropna().unique().tolist())
+        return sorted(df["provider_code_current"].dropna().unique().tolist())
 
     def get_unique_service_lines(self, df: Optional[pd.DataFrame] = None) -> List[str]:
         """Get list of unique service lines."""
@@ -367,11 +368,11 @@ class DataHandler:
         if df is None:
             df = self.patient_df
 
-        if df is None or "periodend" not in df.columns:
+        if df is None or "period_end" not in df.columns:
             return None, None
 
-        min_date = df["periodend"].min().strftime("%Y-%m-%d")
-        max_date = df["periodend"].max().strftime("%Y-%m-%d")
+        min_date = df["period_end"].min().strftime("%Y-%m-%d")
+        max_date = df["period_end"].max().strftime("%Y-%m-%d")
 
         return min_date, max_date
 
@@ -392,16 +393,16 @@ class DataHandler:
             return {}
 
         # Get latest period data
-        latest_period = df["periodend"].max()
-        latest_data = df[df["periodend"] == latest_period]
+        latest_period = df["period_end"].max()
+        latest_data = df[df["period_end"] == latest_period]
 
         summary = {
             "total_referrals": int(latest_data["referrals"].sum()),
             "total_waiters": int(latest_data["waiters"].sum()),
             "total_caseload": int(latest_data["caseload"].sum()),
-            "total_contacts": int(latest_data["totalcontacts"].sum()),
+            "total_contacts": int(latest_data["total_contacts"].sum()),
             "avg_wait_18plus_pct": (
-                latest_data["waiters18plusweeks"].sum()
+                latest_data["waiters_over_18_weeks"].sum()
                 / latest_data["waiters"].sum()
                 * 100
                 if latest_data["waiters"].sum() > 0
