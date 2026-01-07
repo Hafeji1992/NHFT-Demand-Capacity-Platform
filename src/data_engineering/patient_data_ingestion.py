@@ -12,7 +12,12 @@ from datetime import date, timedelta
 import pandas as pd
 from tqdm import tqdm
 
-from connect import SQLServerConnection
+try:
+    # Prefer package import to avoid collisions with site-packages (e.g. `connect.py`)
+    from data_engineering.connect import SQLServerConnection
+except ImportError:  # pragma: no cover
+    # Fallback for running this file directly
+    from connect import SQLServerConnection
 
 # ---------------------------------------------------------------------
 # Logging

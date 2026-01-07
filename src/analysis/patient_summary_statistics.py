@@ -63,7 +63,7 @@ class PatientSummaryStatistics:
         logger.info(f"Available columns: {', '.join(df.columns)}")
 
         # Verify required columns exist
-        required_cols = ["periodend", "service_line", "providercodecurrent"]
+        required_cols = ["period_end", "service_line", "provider_code_current"]
         missing_cols = [col for col in required_cols if col not in df.columns]
         if missing_cols:
             raise ValueError(f"Missing required columns: {missing_cols}")
@@ -72,39 +72,41 @@ class PatientSummaryStatistics:
             "generation_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "total_records": len(df),
             "date_range": {
-                "start": df["periodend"].min(),
-                "end": df["periodend"].max(),
-                "months": df["periodend"].nunique(),
+                "start": df["period_end"].min(),
+                "end": df["period_end"].max(),
+                "months": df["period_end"].nunique(),
             },
             "dimensions": {
                 "service_lines": df["service_line"].nunique(),
-                "providers": df["providercodecurrent"].nunique(),
+                "providers": df["provider_code_current"].nunique(),
             },
             "key_metrics": {
                 "total_referrals": int(df["referrals"].sum()),
-                "total_clock_stops": int(df["clockstopactuals"].sum()),
+                "total_clock_stops": int(df["clock_stop_actuals"].sum()),
                 "total_waiters": int(df["waiters"].sum()),
-                "waiters_18plus": int(df["waiters18plusweeks"].sum()),
-                "waiters_under_18": int(df["waitersunder18weeks"].sum()),
+                "waiters_over_18_weeks": int(df["waiters_over_18_weeks"].sum()),
+                "waiters_under_18_weeks": int(df["waiters_under_18_weeks"].sum()),
                 "total_caseload": int(df["caseload"].sum()),
-                "total_contacts": int(df["totalcontacts"].sum()),
-                "ftf_contacts": int(df["ftfcontacts"].sum()),
-                "discharges_with_clock_stop": int(df["dischargesfromcaseload"].sum()),
-                "discharges_no_clock_stop": int(df["dischargesnoclockstop"].sum()),
+                "total_contacts": int(df["total_contacts"].sum()),
+                "ftf_contacts": int(df["ftf_contacts"].sum()),
+                "discharges_with_clock_stop": int(df["discharges_from_caseload"].sum()),
+                "discharges_no_clock_stop": int(df["discharges_no_clock_stop"].sum()),
             },
             "average_metrics": {
-                "avg_length_of_treatment": float(df["averagelengthoftreatment"].mean()),
+                "avg_length_of_treatment": float(
+                    df["average_length_of_treatment"].mean()
+                ),
                 "avg_contacts_at_discharge": float(
-                    df["averagecontactsatdischarge"].mean()
+                    df["average_contacts_at_discharge"].mean()
                 ),
                 "avg_ftf_contacts_at_discharge": float(
-                    df["averageftfcontactsatdischarge"].mean()
+                    df["average_ftf_contacts_at_discharge"].mean()
                 ),
                 "avg_referral_clock_stop_ratio": float(
-                    df["referralclockstopratio"].mean()
+                    df["referral_clock_stop_ratio"].mean()
                 ),
                 "avg_contacts_per_caseload": float(
-                    df["totalcontactspercaseload"].mean()
+                    df["total_contacts_per_caseload"].mean()
                 ),
             },
         }
@@ -129,14 +131,15 @@ class PatientSummaryStatistics:
 
         agg_dict = {
             "referrals": "sum",
-            "clockstopactuals": "sum",
+            "clock_stop_actuals": "sum",
             "waiters": "sum",
-            "waiters18plusweeks": "sum",
+            "waiters_over_18_weeks": "sum",
+            "waiters_under_18_weeks": "sum",
             "caseload": "sum",
-            "totalcontacts": "sum",
-            "ftfcontacts": "sum",
-            "averagelengthoftreatment": "mean",
-            "averagecontactsatdischarge": "mean",
+            "total_contacts": "sum",
+            "ftf_contacts": "sum",
+            "average_length_of_treatment": "mean",
+            "average_contacts_at_discharge": "mean",
         }
 
         service_breakdown = (
@@ -168,15 +171,16 @@ class PatientSummaryStatistics:
 
         agg_dict = {
             "referrals": "sum",
-            "clockstopactuals": "sum",
+            "clock_stop_actuals": "sum",
             "waiters": "sum",
-            "waiters18plusweeks": "sum",
+            "waiters_over_18_weeks": "sum",
+            "waiters_under_18_weeks": "sum",
             "caseload": "sum",
-            "totalcontacts": "sum",
-            "ftfcontacts": "sum",
+            "total_contacts": "sum",
+            "ftf_contacts": "sum",
         }
 
-        time_series = df.groupby("periodend").agg(agg_dict).round(2).sort_index()
+        time_series = df.groupby("period_end").agg(agg_dict).round(2).sort_index()
 
         logger.info(f"✅ Time series generated for {len(time_series)} periods.")
         return time_series
@@ -247,7 +251,7 @@ class PatientSummaryStatistics:
     # -----------------------------------------------------------------
     def generate_all_statistics(
         self, df: pd.DataFrame, print_summary: bool = True
-    ) -> Tuple[Dict[str, Any], pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    ) -> Tuple[Dict[str, Any], pd.DataFrame, pd.DataFrame]:
         """
         Generate all summary statistics.
 
@@ -256,7 +260,7 @@ class PatientSummaryStatistics:
             print_summary: Whether to print summary to console
 
         Returns:
-            Tuple containing (summary_dict, service_breakdown, provider_breakdown, time_series)
+            Tuple containing (summary_dict, service_breakdown, time_series)
         """
         # Generate all statistics
         summary = self.generate_summary_statistics(df)
@@ -284,14 +288,13 @@ def main():
         stats = PatientSummaryStatistics()
 
         # Generate all statistics
-        summary, service_breakdown, provider_breakdown, time_series = (
-            stats.generate_all_statistics(df, print_summary=True)
+        summary, service_breakdown, time_series = stats.generate_all_statistics(
+            df, print_summary=True
         )
 
         logger.info("🎉 Summary statistics generated successfully!")
         logger.info(f"\n📊 DataFrames available for analysis:")
         logger.info(f"  - service_breakdown: {len(service_breakdown)} rows")
-        logger.info(f"  - provider_breakdown: {len(provider_breakdown)} rows")
         logger.info(f"  - time_series: {len(time_series)} rows")
 
         # Display preview of breakdowns
@@ -299,11 +302,6 @@ def main():
         print("SERVICE LINE BREAKDOWN (Top 10)")
         print("=" * 80)
         print(service_breakdown.head(10))
-
-        print("\n" + "=" * 80)
-        print("PROVIDER BREAKDOWN (Top 10)")
-        print("=" * 80)
-        print(provider_breakdown.head(10))
 
         print("\n" + "=" * 80)
         print("TIME SERIES SUMMARY (Last 10 Periods)")

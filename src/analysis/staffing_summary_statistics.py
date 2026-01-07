@@ -65,7 +65,7 @@ class StaffingSummaryStatistics:
 
         # Verify required columns exist
         required_cols = [
-            "providercodecurrent",
+            "provider_code_current",
             "service_line",
             "staff_group",
             "staff",
@@ -78,19 +78,19 @@ class StaffingSummaryStatistics:
             "generation_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "total_records": len(df),
             "dimensions": {
-                "providers": df["providercodecurrent"].nunique(),
+                "providers": df["provider_code_current"].nunique(),
                 "service_lines": df["service_line"].nunique(),
                 "staff_groups": df["staff_group"].nunique(),
             },
             "key_metrics": {
                 "total_staff": int(df["staff"].sum()),
                 "average_staff_per_service": float(
-                    df.groupby(["providercodecurrent", "service_line"])["staff"]
+                    df.groupby(["provider_code_current", "service_line"])["staff"]
                     .sum()
                     .mean()
                 ),
                 "median_staff_per_service": float(
-                    df.groupby(["providercodecurrent", "service_line"])["staff"]
+                    df.groupby(["provider_code_current", "service_line"])["staff"]
                     .sum()
                     .median()
                 ),
@@ -146,7 +146,7 @@ class StaffingSummaryStatistics:
             df.groupby("staff_group", dropna=False)
             .agg(
                 total_staff=("staff", "sum"),
-                providers=("providercodecurrent", "nunique"),
+                providers=("provider_code_current", "nunique"),
                 service_lines=("service_line", "nunique"),
             )
             .sort_values("total_staff", ascending=False)
