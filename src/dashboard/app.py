@@ -21,9 +21,10 @@ from data_handler import get_data_handler, DataHandler
 # ---------------------------------------------------------------------
 # Logging Configuration
 # ---------------------------------------------------------------------
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
+if not logging.getLogger().handlers:
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+    )
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------
@@ -31,7 +32,6 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------
 try:
     data_handler = get_data_handler()
-    logger.info("✅ Data handler initialised successfully")
 except Exception as e:
     logger.error(f"❌ Failed to initialise data handler: {e}")
     data_handler = None
@@ -392,30 +392,30 @@ def update_summary_stats(data_json):
     Output("footer-content", "children"), [Input("filtered-data-store", "data")]
 )
 def update_footer(data_json):
-    """Update footer text, including the latest period end date.
+    """Update footer text, including the latest reporting period end date.
 
     Args:
         data_json: JSON-encoded DataFrame (orient="split") from dcc.Store.
 
     Returns:
-        A Dash HTML paragraph element with the refresh date.
+        A Dash HTML paragraph element with the latest reporting period end date.
     """
     if data_json is None or data_handler is None:
-        latest_date = "N/A"
+        latest_period_end = "N/A"
     else:
         df = pd.read_json(StringIO(data_json), orient="split")
 
         if not df.empty:
             df["period_end"] = pd.to_datetime(df["period_end"])
-            latest_date = df["period_end"].max().strftime("%d %B %Y")
+            latest_period_end = df["period_end"].max().strftime("%d %B %Y")
         else:
-            latest_date = "N/A"
+            latest_period_end = "N/A"
 
     return html.P(
         [
             "© 2025 Northamptonshire Healthcare NHS Foundation Trust | ",
             "BI Development Team | ",
-            html.Strong(f"Data Last Refreshed: {latest_date}"),
+            html.Strong(f"Latest Reporting Period End: {latest_period_end}"),
         ],
         className="text-center text-muted mb-0",
     )
@@ -1008,4 +1008,6 @@ if __name__ == "__main__":
     logger.info("Starting NHFT Demand-Capacity Dashboard...")
     logger.info("Dashboard will be available at: http://127.0.0.1:8050/")
 
-    app.run(debug=True, host="127.0.0.1", port=8050)
+    # Flask's debug reloader starts the app twice (parent + child). Disable it to
+    # prevent duplicate startup logs while keeping debug mode features.
+    app.run(debug=True, host="127.0.0.1", port=8050, use_reloader=False)
