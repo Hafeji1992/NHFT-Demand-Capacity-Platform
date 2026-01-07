@@ -101,8 +101,11 @@ def main() -> int:
             patient_cutoff = cutoff_ts.strftime("%Y-%m-%d")
 
             df = extractor.extract_patient_data()
-            if not df.empty and "periodend" in df.columns:
-                patient_max_periodend = pd.to_datetime(df["periodend"]).max().strftime("%Y-%m-%d")
+            period_col = "period_end" if "period_end" in df.columns else "periodend"
+            if not df.empty and period_col in df.columns:
+                patient_max_periodend = (
+                    pd.to_datetime(df[period_col]).max().strftime("%Y-%m-%d")
+                )
 
             extractor.save_to_csv(df, filename="patient_data.csv")
     else:

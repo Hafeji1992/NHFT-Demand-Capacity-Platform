@@ -5,13 +5,14 @@ Extracts patient demand metrics from SQL Server and writes a cleaned CSV for ana
 """
 
 import logging
+import re
 from pathlib import Path
 from typing import Optional, Dict, List, Tuple
 from datetime import date, timedelta
 import pandas as pd
 from tqdm import tqdm
 
-from data_engineering.connect import SQLServerConnection
+from connect import SQLServerConnection
 
 # ---------------------------------------------------------------------
 # Logging
@@ -129,8 +130,8 @@ class PatientDataExtractor:
             -- WAITER METRICS
             -- ========================================================================
             WT.[Waiters],
-            WT.[Waiters] - WT.[Waiters18Plus] AS [Waiters<18Weeks],
-            WT.[Waiters18Plus] AS [Waiters18+Weeks],
+            WT.[Waiters] - WT.[Waiters18Plus] AS [WaitersUnder18Weeks],
+            WT.[Waiters18Plus] AS [WaitersOver18Weeks],
 
             -- ======================================================================== 
             -- DISCHARGE AND TREATMENT METRICS
@@ -250,29 +251,29 @@ class PatientDataExtractor:
 
     # Expected columns after normalisation
     EXPECTED_COLUMNS = [
-        "providercodecurrent",
+        "provider_code_current",
         "service_line",
-        "periodend",
+        "period_end",
         "referrals",
-        "clockstopactuals",
-        "dischargesnoclockstop",
-        "referralclockstopratio",
-        "referraldischargednoclockstopratio",
-        "demandratio",
-        "totalcontacts",
-        "ftfcontacts",
+        "clock_stop_actuals",
+        "discharges_no_clock_stop",
+        "referral_clock_stop_ratio",
+        "referral_discharged_no_clock_stop_ratio",
+        "demand_ratio",
+        "total_contacts",
+        "ftf_contacts",
         "caseload",
-        "totalcaseloadcontacts",
-        "ftfcaseloadcontacts",
-        "totalcontactspercaseload",
-        "ftfcontactspercaseload",
+        "total_caseload_contacts",
+        "ftf_caseload_contacts",
+        "total_contacts_per_caseload",
+        "ftf_contacts_per_caseload",
         "waiters",
-        "waitersunder18weeks",
-        "waiters18plusweeks",
-        "averagelengthoftreatment",
-        "averagecontactsatdischarge",
-        "averageftfcontactsatdischarge",
-        "dischargesfromcaseload",
+        "waiters_under_18_weeks",
+        "waiters_over_18_weeks",
+        "average_length_of_treatment",
+        "average_contacts_at_discharge",
+        "average_ftf_contacts_at_discharge",
+        "discharges_from_caseload",
     ]
 
     # -----------------------------------------------------------------
@@ -324,14 +325,36 @@ class PatientDataExtractor:
         Returns:
             List of normalised column names
         """
-        return [
-            col.lower()
-            .replace(" ", "_")
-            .replace("<", "under")
-            .replace(">", "over")
-            .replace("+", "plus")
-            for col in columns
-        ]
+
+        def to_snake_case(name: str) -> str:
+            # Replace common symbols with readable tokens
+            name = name.strip()
+
+            # Keep semantic meaning from source column names
+            name = name.replace("<", "_under_")
+            name = name.replace(">", "_over_")
+            name = name.replace("+", "_plus_")
+
+            # Convert CamelCase/PascalCase (including acronyms) to snake_case
+            name = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", name)
+            name = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", name)
+
+            # Split letter/digit boundaries (e.g., Waiters18 -> Waiters_18)
+            name = re.sub(r"([A-Za-z])([0-9])", r"\1_\2", name)
+            name = re.sub(r"([0-9])([A-Za-z])", r"\1_\2", name)
+
+            # Normalise separators
+            name = name.replace(" ", "_")
+            name = re.sub(r"[^0-9A-Za-z_]+", "_", name)
+            name = re.sub(r"_+", "_", name).strip("_").lower()
+
+            # Consistent naming for waiters split columns
+            if name == "waiters_18_plus_weeks":
+                return "waiters_over_18_weeks"
+
+            return name
+
+        return [to_snake_case(col) for col in columns]
 
     # -----------------------------------------------------------------
     # Schema Validation
@@ -376,7 +399,7 @@ class PatientDataExtractor:
         issues = []
 
         # Critical columns that should not have nulls
-        critical_cols = ["providercodecurrent", "periodend", "service_line"]
+        critical_cols = ["provider_code_current", "period_end", "service_line"]
 
         for col in critical_cols:
             if col in df.columns:
@@ -410,20 +433,20 @@ class PatientDataExtractor:
         """
         issues = []
 
-        # Check periodend is datetime
-        if "periodend" in df.columns and not pd.api.types.is_datetime64_any_dtype(
-            df["periodend"]
+        # Check period_end is datetime
+        if "period_end" in df.columns and not pd.api.types.is_datetime64_any_dtype(
+            df["period_end"]
         ):
-            issues.append("periodend column is not datetime type")
+            issues.append("period_end column is not datetime type")
 
         # Check numeric columns
         numeric_cols = [
             "referrals",
-            "clockstopactuals",
+            "clock_stop_actuals",
             "waiters",
             "caseload",
-            "totalcontacts",
-            "ftfcontacts",
+            "total_contacts",
+            "ftf_contacts",
         ]
 
         for col in numeric_cols:
@@ -450,13 +473,13 @@ class PatientDataExtractor:
         # Count columns should not be negative
         count_cols = [
             "referrals",
-            "clockstopactuals",
+            "clock_stop_actuals",
             "waiters",
             "caseload",
-            "totalcontacts",
-            "ftfcontacts",
-            "dischargesnoclockstop",
-            "dischargesfromcaseload",
+            "total_contacts",
+            "ftf_contacts",
+            "discharges_no_clock_stop",
+            "discharges_from_caseload",
         ]
 
         for col in count_cols:
@@ -485,16 +508,16 @@ class PatientDataExtractor:
         # Total waiters should equal under18 + 18plus waiters
         if all(
             col in df.columns
-            for col in ["waiters", "waitersunder18weeks", "waiters18plusweeks"]
+            for col in ["waiters", "waiters_under_18_weeks", "waiters_over_18_weeks"]
         ):
             mismatch = df[
                 (df["waiters"].notna())
-                & (df["waitersunder18weeks"].notna())
-                & (df["waiters18plusweeks"].notna())
+                & (df["waiters_under_18_weeks"].notna())
+                & (df["waiters_over_18_weeks"].notna())
                 & (
                     abs(
                         df["waiters"]
-                        - (df["waitersunder18weeks"] + df["waiters18plusweeks"])
+                        - (df["waiters_under_18_weeks"] + df["waiters_over_18_weeks"])
                     )
                     > 0.1
                 )
@@ -503,21 +526,23 @@ class PatientDataExtractor:
             if len(mismatch) > 0:
                 issues.append(
                     f"Waiter calculation mismatch: {len(mismatch):,} rows where "
-                    f"waiters ≠ waitersunder18weeks + waiters18plusweeks"
+                    f"waiters ≠ waiters_under_18_weeks + waiters_over_18_weeks"
                 )
 
         # FTF contacts should not exceed total contacts
-        if "ftfcontacts" in df.columns and "totalcontacts" in df.columns:
-            invalid = (df["ftfcontacts"] > df["totalcontacts"]).sum()
+        if "ftf_contacts" in df.columns and "total_contacts" in df.columns:
+            invalid = (df["ftf_contacts"] > df["total_contacts"]).sum()
             if invalid > 0:
                 issues.append(f"FTF contacts exceed total contacts in {invalid:,} rows")
 
         # FTF caseload contacts should not exceed total caseload contacts
         if (
-            "ftfcaseloadcontacts" in df.columns
-            and "totalcaseloadcontacts" in df.columns
+            "ftf_caseload_contacts" in df.columns
+            and "total_caseload_contacts" in df.columns
         ):
-            invalid = (df["ftfcaseloadcontacts"] > df["totalcaseloadcontacts"]).sum()
+            invalid = (
+                df["ftf_caseload_contacts"] > df["total_caseload_contacts"]
+            ).sum()
             if invalid > 0:
                 issues.append(
                     f"FTF caseload contacts exceed total caseload contacts in {invalid:,} rows"
@@ -541,7 +566,7 @@ class PatientDataExtractor:
         issues = []
 
         # Check for duplicate combinations of provider, service_line, and period
-        key_cols = ["providercodecurrent", "service_line", "periodend"]
+        key_cols = ["provider_code_current", "service_line", "period_end"]
 
         if all(col in df.columns for col in key_cols):
             duplicates = df.duplicated(subset=key_cols, keep=False).sum()
@@ -568,11 +593,11 @@ class PatientDataExtractor:
         """
         issues = []
 
-        if "periodend" not in df.columns:
+        if "period_end" not in df.columns:
             return True, issues
 
         # Get unique periods sorted
-        periods = df["periodend"].dropna().sort_values().unique()
+        periods = df["period_end"].dropna().sort_values().unique()
 
         if len(periods) < 2:
             return True, issues
@@ -688,14 +713,14 @@ class PatientDataExtractor:
             # Normalise column names
             df.columns = self._normalise_column_names(df.columns)
 
-            # Convert periodend to datetime
-            if "periodend" in df.columns:
-                df["periodend"] = pd.to_datetime(df["periodend"])
+            # Convert period_end to datetime
+            if "period_end" in df.columns:
+                df["period_end"] = pd.to_datetime(df["period_end"])
 
                 # Cap to last fully completed month (prevents partial-month leakage)
                 cutoff = self.get_last_full_month_end()
                 before_rows = len(df)
-                df = df[df["periodend"].notna() & (df["periodend"] <= cutoff)]
+                df = df[df["period_end"].notna() & (df["period_end"] <= cutoff)]
                 removed = before_rows - len(df)
 
                 if removed > 0:
@@ -703,7 +728,7 @@ class PatientDataExtractor:
                         f"📅 Applied month-end cutoff at {cutoff.date()}: removed {removed:,} row(s)"
                     )
                 logger.info(
-                    f"📅 Max periodend in extracted dataset: {df['periodend'].max().date() if not df.empty else 'N/A'}"
+                    f"📅 Max period_end in extracted dataset: {df['period_end'].max().date() if not df.empty else 'N/A'}"
                 )
 
             logger.info(f"✅ Retrieved {len(df):,} rows from source views.")
@@ -814,7 +839,7 @@ def load_patient_data(csv_path: Optional[str] = None) -> pd.DataFrame:
         raise FileNotFoundError(f"Patient data file not found at: {csv_path}")
 
     logger.info(f"📂 Loading data from: {csv_path}")
-    df = pd.read_csv(csv_path, parse_dates=["periodend"])
+    df = pd.read_csv(csv_path, parse_dates=["period_end"])
     logger.info(f"✅ Loaded {len(df):,} records with {len(df.columns)} columns")
 
     return df

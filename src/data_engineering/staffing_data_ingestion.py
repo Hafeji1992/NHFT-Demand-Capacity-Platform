@@ -5,12 +5,13 @@ Extracts staffing capacity metrics from ESR and writes a cleaned CSV for analysi
 """
 
 import logging
+import re
 from pathlib import Path
 from typing import Optional, Dict, List, Tuple
 import pandas as pd
 from tqdm import tqdm
 
-from data_engineering.connect import SQLServerConnection
+from connect import SQLServerConnection
 
 # ---------------------------------------------------------------------
 # Logging
@@ -79,8 +80,8 @@ class StaffingDataExtractor:
             [Staff Group]
 
         ORDER BY
-            ProviderCodeCurrent,
-            Service_Line,
+            [ProviderCodeCurrent],
+            [Service_Line],
             [Staff Group];
     """
 
@@ -88,7 +89,7 @@ class StaffingDataExtractor:
     EXPECTED_COLUMNS = [
         "staff",
         "staff_group",
-        "providercodecurrent",
+        "provider_code_current",
         "service_line",
     ]
 
@@ -141,7 +142,27 @@ class StaffingDataExtractor:
         Returns:
             List of normalised column names
         """
-        return [col.lower().replace(" ", "_").replace("+", "plus") for col in columns]
+
+        def to_snake_case(name: str) -> str:
+            # Replace common symbols with readable tokens
+            name = name.strip()
+
+            # Convert CamelCase/PascalCase (including acronyms) to snake_case
+            name = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", name)
+            name = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", name)
+
+            # Split letter/digit boundaries (e.g., Waiters18 -> Waiters_18)
+            name = re.sub(r"([A-Za-z])([0-9])", r"\1_\2", name)
+            name = re.sub(r"([0-9])([A-Za-z])", r"\1_\2", name)
+
+            # Normalise separators
+            name = name.replace(" ", "_")
+            name = re.sub(r"[^0-9A-Za-z_]+", "_", name)
+            name = re.sub(r"_+", "_", name).strip("_").lower()
+
+            return name
+
+        return [to_snake_case(col) for col in columns]
 
     # -----------------------------------------------------------------
     # Schema Validation
@@ -186,7 +207,7 @@ class StaffingDataExtractor:
         issues = []
 
         # Critical columns that should not have nulls
-        critical_cols = ["providercodecurrent", "service_line", "staff_group"]
+        critical_cols = ["provider_code_current", "service_line", "staff_group"]
 
         for col in critical_cols:
             if col in df.columns:
@@ -265,7 +286,7 @@ class StaffingDataExtractor:
         issues = []
 
         # Check for duplicate combinations of provider, service_line, and staff_group
-        key_cols = ["providercodecurrent", "service_line", "staff_group"]
+        key_cols = ["provider_code_current", "service_line", "staff_group"]
 
         if all(col in df.columns for col in key_cols):
             dupes = df.duplicated(subset=key_cols, keep=False).sum()
