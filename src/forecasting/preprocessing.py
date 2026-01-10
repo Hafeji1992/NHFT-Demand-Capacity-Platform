@@ -16,7 +16,7 @@ def build_monthly_series(
     date_col: str = "period_end",
     agg: AggMethod = "sum",
     fill_missing: FillMissing = "zero",
-    freq: str = "M",
+    freq: str = "ME",
 ) -> pd.Series:
     """Aggregate a raw transactional/row-level DataFrame into a monthly time series.
 
@@ -96,7 +96,7 @@ def build_monthly_series(
 def coerce_monthly_series(
     y: pd.Series,
     *,
-    freq: str = "M",
+    freq: str = "ME",
     fill_missing: FillMissing = "zero",
 ) -> pd.Series:
     """Coerce an existing series into a regular monthly series.

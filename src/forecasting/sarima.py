@@ -65,7 +65,7 @@ class SarimaForecaster:
 
         # Encourage statsmodels to keep a monthly DatetimeIndex in forecast outputs.
         if y.index.freq is None:
-            y = y.asfreq("M")
+            y = y.asfreq("ME")
 
         self._y = y
 
@@ -146,7 +146,7 @@ def small_grid_search_aic(
     y = pd.to_numeric(y, errors="coerce").astype(float)
     y = y.sort_index()
     if y.index.freq is None:
-        y = y.asfreq("M")
+        y = y.asfreq("ME")
 
     for pi in p:
         for di in d:

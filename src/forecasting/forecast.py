@@ -15,7 +15,7 @@ class ForecastConfig:
 
     months_ahead: int = 6
     conf_level: float = 0.95
-    freq: str = "M"
+    freq: str = "ME"
     auto_select: bool = False
     seasonal_period: int = 12
 
