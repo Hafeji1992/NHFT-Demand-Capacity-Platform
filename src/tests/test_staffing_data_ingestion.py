@@ -1,16 +1,29 @@
 import sys
 from pathlib import Path
+import logging
+
 import pandas as pd
 import pytest
 
-# Ensure src is on the path
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-sys.path.append(str(PROJECT_ROOT / "src"))
+# Ensure imports work for both:
+# - `from data_engineering...` (package import)
+# - ingestion scripts that do `from connect import ...` (module in data_engineering folder)
+#
+# Note: tests live in `src/tests`, so the repo root is `parents[2]`.
+REPO_ROOT = Path(__file__).resolve().parents[2]
+SRC_ROOT = REPO_ROOT / "src"
+DATA_ENGINEERING_ROOT = SRC_ROOT / "data_engineering"
+sys.path.insert(0, str(SRC_ROOT))
+sys.path.insert(0, str(DATA_ENGINEERING_ROOT))
+
+# Avoid noisy logging errors under pytest capture on Windows
+logging.disable(logging.CRITICAL)
 
 from data_engineering.staffing_data_ingestion import (
     StaffingDataExtractor,
     load_staffing_data,
 )
+
 
 # ---------------------------------------------------------------------
 # Fake DB infrastructure
@@ -29,6 +42,7 @@ class FakeCursor:
     def close(self):
         pass
 
+
 # ---------------------------------------------------------------------
 # Fake DB connection
 # ---------------------------------------------------------------------
@@ -40,20 +54,23 @@ class FakeConnection:
     def cursor(self):
         return FakeCursor(self._rows, self._columns)
 
+
 # ---------------------------------------------------------------------
 # Fake SQLServerConnection
 # ---------------------------------------------------------------------
 class FakeSQLServerConnection:
-    """Mock replacement for SQLServerConnection."""
+    """Replaces SQLServerConnection in tests."""
+
     def __init__(self, _config_path=None):
         pass
 
     def connect(self):
+        # Build a minimal dataset that aligns with EXPECTED_COLUMNS after normalisation
         columns = [
-            "Staff",
-            "Staff Group",
-            "ProviderCodeCurrent",
-            "Service_Line",
+            "staff",
+            "staff_group",
+            "provider_code_current",
+            "service_line",
         ]
 
         rows = [
@@ -71,14 +88,15 @@ class FakeSQLServerConnection:
 # Unit Test - Normalise Column Names
 # ---------------------------------------------------------------------
 def test_normalise_column_names():
-    cols = ["Staff Group", "Service Line", "ProviderCodeCurrent"]
+    cols = ["Staff_Group", "Service_Line", "ProviderCodeCurrent"]
     normalised = StaffingDataExtractor._normalise_column_names(cols)
 
     assert normalised == [
         "staff_group",
         "service_line",
-        "providercodecurrent",
+        "provider_code_current",
     ]
+
 
 # ---------------------------------------------------------------------
 # Unit Tests - StaffingDataExtractor
@@ -104,11 +122,12 @@ def test_extract_staffing_data_with_mocked_db(monkeypatch):
     expected_cols = {
         "staff",
         "staff_group",
-        "providercodecurrent",
+        "provider_code_current",
         "service_line",
     }
     assert set(df.columns) == expected_cols
     assert df["staff"].sum() == 20
+
 
 # ---------------------------------------------------------------------
 # Unit Tests - Schema Validation
@@ -132,6 +151,7 @@ def test_schema_validation_failure(monkeypatch):
 
     assert "Schema Validation" in results["failed"]
 
+
 # ---------------------------------------------------------------------
 # Unit Tests - Duplicate Detection
 # ---------------------------------------------------------------------
@@ -153,6 +173,7 @@ def test_duplicate_detection(monkeypatch):
     results = extractor.run_data_quality_checks(df)
     assert "Duplicate Detection" in results["failed"]
 
+
 # ---------------------------------------------------------------------
 # Unit Tests - load_staffing_data
 # ---------------------------------------------------------------------
@@ -162,18 +183,21 @@ def test_load_staffing_data_reads_csv(tmp_path):
     """
     test_file = tmp_path / "staffing_data.csv"
 
-    df_in = pd.DataFrame({
-        "staff": [10, 5],
-        "staff_group": ["Nursing", "Medical"],
-        "providercodecurrent": ["001", "001"],
-        "service_line": ["Adult Inpatients Acute", "Adult Inpatients Acute"],
-    })
+    df_in = pd.DataFrame(
+        {
+            "staff": [10, 5],
+            "staff_group": ["Nursing", "Medical"],
+            "provider_code_current": ["001", "001"],
+            "service_line": ["Adult Inpatients Acute", "Adult Inpatients Acute"],
+        }
+    )
     df_in.to_csv(test_file, index=False)
 
     df_out = load_staffing_data(test_file)
 
     assert len(df_out) == 2
     assert df_out["staff"].sum() == 15
+
 
 # ---------------------------------------------------------------------
 # Unit Test - load_staffing_data missing file
@@ -182,3 +206,7 @@ def test_load_staffing_data_missing_file_raises(tmp_path):
     missing = tmp_path / "missing.csv"
     with pytest.raises(FileNotFoundError):
         load_staffing_data(missing)
+
+
+if __name__ == "__main__":
+    raise SystemExit(pytest.main([__file__]))

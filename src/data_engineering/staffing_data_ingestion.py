@@ -1,17 +1,28 @@
+"""
+NHFT Staffing Data Ingestion
+=============================
+Extracts staffing capacity metrics from ESR and writes a cleaned CSV for analysis and the dashboard.
+"""
+
 import logging
+import re
 from pathlib import Path
 from typing import Optional, Dict, List, Tuple
 import pandas as pd
 from tqdm import tqdm
 
-from data_engineering.connect import SQLServerConnection
+try:
+    # Prefer package import to avoid collisions with site-packages (e.g. `connect.py`)
+    from data_engineering.connect import SQLServerConnection
+except ImportError:  # pragma: no cover
+    # Fallback for running this file directly
+    from connect import SQLServerConnection
 
 # ---------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s"
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
@@ -21,6 +32,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------
 class DataQualityException(Exception):
     """Custom exception for data quality failures."""
+
     pass
 
 
@@ -73,8 +85,8 @@ class StaffingDataExtractor:
             [Staff Group]
 
         ORDER BY
-            ProviderCodeCurrent,
-            Service_Line,
+            [ProviderCodeCurrent],
+            [Service_Line],
             [Staff Group];
     """
 
@@ -82,18 +94,18 @@ class StaffingDataExtractor:
     EXPECTED_COLUMNS = [
         "staff",
         "staff_group",
-        "providercodecurrent",
+        "provider_code_current",
         "service_line",
     ]
 
-# -----------------------------------------------------------------
-# Initialisation
-# -----------------------------------------------------------------
+    # -----------------------------------------------------------------
+    # Initialisation
+    # -----------------------------------------------------------------
     def __init__(
-            self,
-            config_path: Optional[str] = None,
-            output_dir: Optional[str] = None,
-            run_quality_checks: bool = True,
+        self,
+        config_path: Optional[str] = None,
+        output_dir: Optional[str] = None,
+        run_quality_checks: bool = True,
     ):
         """
         Initialise SQL Server connection and output directory.
@@ -135,16 +147,31 @@ class StaffingDataExtractor:
         Returns:
             List of normalised column names
         """
-        return [
-            col.lower()
-            .replace(" ", "_")
-            .replace("+", "plus")
-            for col in columns
-        ]
 
-# -----------------------------------------------------------------
-# Schema Validation
-# -----------------------------------------------------------------
+        def to_snake_case(name: str) -> str:
+            # Replace common symbols with readable tokens
+            name = name.strip()
+
+            # Convert CamelCase/PascalCase (including acronyms) to snake_case
+            name = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", name)
+            name = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", name)
+
+            # Split letter/digit boundaries (e.g., Waiters18 -> Waiters_18)
+            name = re.sub(r"([A-Za-z])([0-9])", r"\1_\2", name)
+            name = re.sub(r"([0-9])([A-Za-z])", r"\1_\2", name)
+
+            # Normalise separators
+            name = name.replace(" ", "_")
+            name = re.sub(r"[^0-9A-Za-z_]+", "_", name)
+            name = re.sub(r"_+", "_", name).strip("_").lower()
+
+            return name
+
+        return [to_snake_case(col) for col in columns]
+
+    # -----------------------------------------------------------------
+    # Schema Validation
+    # -----------------------------------------------------------------
     def _check_schema(self, df: pd.DataFrame) -> Tuple[bool, List[str]]:
         """
         Check if DataFrame has expected columns.
@@ -169,9 +196,9 @@ class StaffingDataExtractor:
 
         return len(issues) == 0, issues
 
-# -----------------------------------------------------------------
-# Data Completeness Checks
-# -----------------------------------------------------------------
+    # -----------------------------------------------------------------
+    # Data Completeness Checks
+    # -----------------------------------------------------------------
     def _check_data_completeness(self, df: pd.DataFrame) -> Tuple[bool, List[str]]:
         """
         Check for missing values in critical columns.
@@ -185,7 +212,7 @@ class StaffingDataExtractor:
         issues = []
 
         # Critical columns that should not have nulls
-        critical_cols = ['providercodecurrent', 'service_line', 'staff_group']
+        critical_cols = ["provider_code_current", "service_line", "staff_group"]
 
         for col in critical_cols:
             if col in df.columns:
@@ -204,9 +231,9 @@ class StaffingDataExtractor:
 
         return len(issues) == 0, issues
 
-# -----------------------------------------------------------------
-# Data Type Checks
-# -----------------------------------------------------------------
+    # -----------------------------------------------------------------
+    # Data Type Checks
+    # -----------------------------------------------------------------
     def _check_data_types(self, df: pd.DataFrame) -> Tuple[bool, List[str]]:
         """
         Check if data types are appropriate.
@@ -220,14 +247,14 @@ class StaffingDataExtractor:
         issues = []
 
         # Check staff is numeric
-        if 'staff' in df.columns and not pd.api.types.is_numeric_dtype(df['staff']):
+        if "staff" in df.columns and not pd.api.types.is_numeric_dtype(df["staff"]):
             issues.append(f"staff is not numeric type (found: {df['staff'].dtype})")
 
         return len(issues) == 0, issues
 
-# -----------------------------------------------------------------
-# Data Range Checks
-# -----------------------------------------------------------------
+    # -----------------------------------------------------------------
+    # Data Range Checks
+    # -----------------------------------------------------------------
     def _check_data_ranges(self, df: pd.DataFrame) -> Tuple[bool, List[str]]:
         """
         Check if numeric values are within reasonable ranges.
@@ -248,9 +275,9 @@ class StaffingDataExtractor:
 
         return len(issues) == 0, issues
 
-# -----------------------------------------------------------------
-# Duplicate Detection
-# -----------------------------------------------------------------
+    # -----------------------------------------------------------------
+    # Duplicate Detection
+    # -----------------------------------------------------------------
     def _check_duplicates(self, df: pd.DataFrame) -> Tuple[bool, List[str]]:
         """
         Check for duplicate records.
@@ -264,21 +291,20 @@ class StaffingDataExtractor:
         issues = []
 
         # Check for duplicate combinations of provider, service_line, and staff_group
-        key_cols = ["providercodecurrent", "service_line", "staff_group"]
+        key_cols = ["provider_code_current", "service_line", "staff_group"]
 
         if all(col in df.columns for col in key_cols):
             dupes = df.duplicated(subset=key_cols, keep=False).sum()
             if dupes > 0:
                 issues.append(
-                    f"Found {dupes:,} duplicate rows based on "
-                    f"{', '.join(key_cols)}"
+                    f"Found {dupes:,} duplicate rows based on " f"{', '.join(key_cols)}"
                 )
 
         return len(issues) == 0, issues
 
-# -----------------------------------------------------------------
-# Data Quality Checks
-# -----------------------------------------------------------------
+    # -----------------------------------------------------------------
+    # Data Quality Checks
+    # -----------------------------------------------------------------
     def run_data_quality_checks(self, df: pd.DataFrame) -> Dict[str, any]:
         """
         Run all data quality checks and return results.
@@ -319,7 +345,9 @@ class StaffingDataExtractor:
         passed_checks = len(results["passed"])
         failed_checks = len(results["failed"])
 
-        logger.info(f"\n📊 Quality Check Summary: {passed_checks}/{total_checks} passed")
+        logger.info(
+            f"\n📊 Quality Check Summary: {passed_checks}/{total_checks} passed"
+        )
 
         if failed_checks > 0:
             logger.warning(f"⚠️ {failed_checks} check(s) failed - review issues above")
@@ -371,7 +399,9 @@ class StaffingDataExtractor:
             df.columns = self._normalise_column_names(df.columns)
 
             logger.info(f"✅ Retrieved {len(df):,} rows from source views.")
-            logger.info(f"📊 Columns: {', '.join(df.columns)} ({len(df.columns)} total)")
+            logger.info(
+                f"📊 Columns: {', '.join(df.columns)} ({len(df.columns)} total)"
+            )
 
             # Run data quality checks
             if self.run_quality_checks:
@@ -379,7 +409,9 @@ class StaffingDataExtractor:
 
                 # Optionally raise exception if critical checks fail
                 critical_checks = ["Schema Validation", "Data Types"]
-                failed_critical = [c for c in critical_checks if c in quality_results["failed"]]
+                failed_critical = [
+                    c for c in critical_checks if c in quality_results["failed"]
+                ]
 
                 if failed_critical:
                     raise DataQualityException(
@@ -398,7 +430,9 @@ class StaffingDataExtractor:
     # -----------------------------------------------------------------
     # Data Persistence
     # -----------------------------------------------------------------
-    def save_to_csv(self, df: pd.DataFrame, filename: str = "staffing_data.csv") -> Path:
+    def save_to_csv(
+        self, df: pd.DataFrame, filename: str = "staffing_data.csv"
+    ) -> Path:
         """
         Save DataFrame to CSV file.
 

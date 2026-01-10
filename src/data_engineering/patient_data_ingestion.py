@@ -1,32 +1,67 @@
+"""
+NHFT Patient Data Ingestion
+============================
+Extracts patient demand metrics from SQL Server and writes a cleaned CSV for analysis and the dashboard.
+"""
+
 import logging
+import re
 from pathlib import Path
 from typing import Optional, Dict, List, Tuple
+from datetime import date, timedelta
 import pandas as pd
 from tqdm import tqdm
 
-from data_engineering.connect import SQLServerConnection
+try:
+    # Prefer package import to avoid collisions with site-packages (e.g. `connect.py`)
+    from data_engineering.connect import SQLServerConnection
+except ImportError:  # pragma: no cover
+    # Fallback for running this file directly
+    from connect import SQLServerConnection
 
 # ---------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s"
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
+
 
 # ---------------------------------------------------------------------
 # Custom Exceptions
 # ---------------------------------------------------------------------
 class DataQualityException(Exception):
     """Custom exception for data quality failures."""
+
     pass
+
 
 # ---------------------------------------------------------------------
 # Patient Data Extractor
 # ---------------------------------------------------------------------
 class PatientDataExtractor:
     """Extracts patient data from SQL Server and saves to CSV."""
+
+    @staticmethod
+    def get_last_full_month_end(reference_date: Optional[date] = None) -> pd.Timestamp:
+        """Return the last day of the most recently completed month.
+
+        Example:
+            If today is 2026-01-06, this returns 2025-12-31.
+
+        Args:
+            reference_date: Optional date to compute the cutoff from. Defaults to today.
+
+        Returns:
+            A pandas Timestamp representing the previous month-end.
+        """
+        if reference_date is None:
+            reference_date = date.today()
+
+        first_of_month = reference_date.replace(day=1)
+        last_day_previous_month = first_of_month - timedelta(days=1)
+        return pd.Timestamp(last_day_previous_month)
 
     # SQL query as class constant for better maintainability
     PATIENT_QUERY = """
@@ -100,8 +135,8 @@ class PatientDataExtractor:
             -- WAITER METRICS
             -- ========================================================================
             WT.[Waiters],
-            WT.[Waiters] - WT.[Waiters18Plus] AS [Waiters<18Weeks],
-            WT.[Waiters18Plus] AS [Waiters18+Weeks],
+            WT.[Waiters] - WT.[Waiters18Plus] AS [WaitersUnder18Weeks],
+            WT.[Waiters18Plus] AS [WaitersOver18Weeks],
 
             -- ======================================================================== 
             -- DISCHARGE AND TREATMENT METRICS
@@ -221,22 +256,40 @@ class PatientDataExtractor:
 
     # Expected columns after normalisation
     EXPECTED_COLUMNS = [
-        'providercodecurrent', 'service_line', 'periodend', 'referrals',
-        'clockstopactuals', 'dischargesnoclockstop', 'referralclockstopratio',
-        'referraldischargednoclockstopratio', 'demandratio', 'totalcontacts',
-        'ftfcontacts', 'caseload', 'totalcaseloadcontacts', 'ftfcaseloadcontacts',
-        'totalcontactspercaseload', 'ftfcontactspercaseload', 'waiters',
-        'waitersunder18weeks', 'waiters18plusweeks', 'averagelengthoftreatment',
-        'averagecontactsatdischarge', 'averageftfcontactsatdischarge',
-        'dischargesfromcaseload'
+        "provider_code_current",
+        "service_line",
+        "period_end",
+        "referrals",
+        "clock_stop_actuals",
+        "discharges_no_clock_stop",
+        "referral_clock_stop_ratio",
+        "referral_discharged_no_clock_stop_ratio",
+        "demand_ratio",
+        "total_contacts",
+        "ftf_contacts",
+        "caseload",
+        "total_caseload_contacts",
+        "ftf_caseload_contacts",
+        "total_contacts_per_caseload",
+        "ftf_contacts_per_caseload",
+        "waiters",
+        "waiters_under_18_weeks",
+        "waiters_over_18_weeks",
+        "average_length_of_treatment",
+        "average_contacts_at_discharge",
+        "average_ftf_contacts_at_discharge",
+        "discharges_from_caseload",
     ]
 
-# -----------------------------------------------------------------
-# Initialisation
-# -----------------------------------------------------------------
-    def __init__(self, config_path: Optional[str] = None,
-                 output_dir: Optional[str] = None,
-                 run_quality_checks: bool = True):
+    # -----------------------------------------------------------------
+    # Initialisation
+    # -----------------------------------------------------------------
+    def __init__(
+        self,
+        config_path: Optional[str] = None,
+        output_dir: Optional[str] = None,
+        run_quality_checks: bool = True,
+    ):
         """
         Initialise SQL Server connection and output directory.
 
@@ -263,9 +316,9 @@ class PatientDataExtractor:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         logger.info(f"📁 Output directory: {self.output_dir}")
 
-# -----------------------------------------------------------------
-# Helper Methods
-# -----------------------------------------------------------------
+    # -----------------------------------------------------------------
+    # Helper Methods
+    # -----------------------------------------------------------------
     @staticmethod
     def _normalise_column_names(columns: list[str]) -> list[str]:
         """
@@ -277,18 +330,40 @@ class PatientDataExtractor:
         Returns:
             List of normalised column names
         """
-        return [
-            col.lower()
-            .replace(" ", "_")
-            .replace("<", "under")
-            .replace(">", "over")
-            .replace("+", "plus")
-            for col in columns
-        ]
 
-# -----------------------------------------------------------------
-# Schema Validation
-# -----------------------------------------------------------------
+        def to_snake_case(name: str) -> str:
+            # Replace common symbols with readable tokens
+            name = name.strip()
+
+            # Keep semantic meaning from source column names
+            name = name.replace("<", "_under_")
+            name = name.replace(">", "_over_")
+            name = name.replace("+", "_plus_")
+
+            # Convert CamelCase/PascalCase (including acronyms) to snake_case
+            name = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", name)
+            name = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", name)
+
+            # Split letter/digit boundaries (e.g., Waiters18 -> Waiters_18)
+            name = re.sub(r"([A-Za-z])([0-9])", r"\1_\2", name)
+            name = re.sub(r"([0-9])([A-Za-z])", r"\1_\2", name)
+
+            # Normalise separators
+            name = name.replace(" ", "_")
+            name = re.sub(r"[^0-9A-Za-z_]+", "_", name)
+            name = re.sub(r"_+", "_", name).strip("_").lower()
+
+            # Consistent naming for waiters split columns
+            if name == "waiters_18_plus_weeks":
+                return "waiters_over_18_weeks"
+
+            return name
+
+        return [to_snake_case(col) for col in columns]
+
+    # -----------------------------------------------------------------
+    # Schema Validation
+    # -----------------------------------------------------------------
     def _check_schema(self, df: pd.DataFrame) -> Tuple[bool, List[str]]:
         """
         Check if DataFrame has expected columns.
@@ -313,9 +388,9 @@ class PatientDataExtractor:
 
         return len(issues) == 0, issues
 
-# -----------------------------------------------------------------
-# Data Completeness Checks
-# -----------------------------------------------------------------
+    # -----------------------------------------------------------------
+    # Data Completeness Checks
+    # -----------------------------------------------------------------
     def _check_data_completeness(self, df: pd.DataFrame) -> Tuple[bool, List[str]]:
         """
         Check for missing values in critical columns.
@@ -329,7 +404,7 @@ class PatientDataExtractor:
         issues = []
 
         # Critical columns that should not have nulls
-        critical_cols = ['providercodecurrent', 'periodend', 'service_line']
+        critical_cols = ["provider_code_current", "period_end", "service_line"]
 
         for col in critical_cols:
             if col in df.columns:
@@ -348,9 +423,9 @@ class PatientDataExtractor:
 
         return len(issues) == 0, issues
 
-# -----------------------------------------------------------------
-# Data Type Checks
-# -----------------------------------------------------------------
+    # -----------------------------------------------------------------
+    # Data Type Checks
+    # -----------------------------------------------------------------
     def _check_data_types(self, df: pd.DataFrame) -> Tuple[bool, List[str]]:
         """
         Check if data types are appropriate.
@@ -363,13 +438,21 @@ class PatientDataExtractor:
         """
         issues = []
 
-        # Check periodend is datetime
-        if 'periodend' in df.columns and not pd.api.types.is_datetime64_any_dtype(df['periodend']):
-            issues.append("periodend column is not datetime type")
+        # Check period_end is datetime
+        if "period_end" in df.columns and not pd.api.types.is_datetime64_any_dtype(
+            df["period_end"]
+        ):
+            issues.append("period_end column is not datetime type")
 
         # Check numeric columns
         numeric_cols = [
-            'referrals', 'clockstopactuals', 'waiters', 'caseload', 'totalcontacts', 'ftfcontacts']
+            "referrals",
+            "clock_stop_actuals",
+            "waiters",
+            "caseload",
+            "total_contacts",
+            "ftf_contacts",
+        ]
 
         for col in numeric_cols:
             if col in df.columns and not pd.api.types.is_numeric_dtype(df[col]):
@@ -377,9 +460,9 @@ class PatientDataExtractor:
 
         return len(issues) == 0, issues
 
-# -----------------------------------------------------------------
-# Data Range Checks
-# -----------------------------------------------------------------
+    # -----------------------------------------------------------------
+    # Data Range Checks
+    # -----------------------------------------------------------------
     def _check_data_ranges(self, df: pd.DataFrame) -> Tuple[bool, List[str]]:
         """
         Check if numeric values are within reasonable ranges.
@@ -394,24 +477,27 @@ class PatientDataExtractor:
 
         # Count columns should not be negative
         count_cols = [
-            'referrals', 'clockstopactuals', 'waiters', 'caseload',
-            'totalcontacts', 'ftfcontacts', 'dischargesnoclockstop',
-            'dischargesfromcaseload'
+            "referrals",
+            "clock_stop_actuals",
+            "waiters",
+            "caseload",
+            "total_contacts",
+            "ftf_contacts",
+            "discharges_no_clock_stop",
+            "discharges_from_caseload",
         ]
 
         for col in count_cols:
             if col in df.columns:
                 negative_count = (df[col] < 0).sum()
                 if negative_count > 0:
-                    issues.append(
-                        f"{col}: {negative_count:,} negative values found"
-                    )
+                    issues.append(f"{col}: {negative_count:,} negative values found")
 
         return len(issues) == 0, issues
 
-# -----------------------------------------------------------------
-# Logical Consistency Checks
-# -----------------------------------------------------------------
+    # -----------------------------------------------------------------
+    # Logical Consistency Checks
+    # -----------------------------------------------------------------
     def _check_logical_consistency(self, df: pd.DataFrame) -> Tuple[bool, List[str]]:
         """
         Check logical relationships between columns.
@@ -425,31 +511,43 @@ class PatientDataExtractor:
         issues = []
 
         # Total waiters should equal under18 + 18plus waiters
-        if all(col in df.columns for col in ['waiters', 'waitersunder18weeks', 'waiters18plusweeks']):
+        if all(
+            col in df.columns
+            for col in ["waiters", "waiters_under_18_weeks", "waiters_over_18_weeks"]
+        ):
             mismatch = df[
-                (df['waiters'].notna()) &
-                (df['waitersunder18weeks'].notna()) &
-                (df['waiters18plusweeks'].notna()) &
-                (abs(df['waiters'] - (df['waitersunder18weeks'] + df['waiters18plusweeks'])) > 0.1)
-                ]
+                (df["waiters"].notna())
+                & (df["waiters_under_18_weeks"].notna())
+                & (df["waiters_over_18_weeks"].notna())
+                & (
+                    abs(
+                        df["waiters"]
+                        - (df["waiters_under_18_weeks"] + df["waiters_over_18_weeks"])
+                    )
+                    > 0.1
+                )
+            ]
 
             if len(mismatch) > 0:
                 issues.append(
                     f"Waiter calculation mismatch: {len(mismatch):,} rows where "
-                    f"waiters ≠ waitersunder18weeks + waiters18plusweeks"
+                    f"waiters ≠ waiters_under_18_weeks + waiters_over_18_weeks"
                 )
 
         # FTF contacts should not exceed total contacts
-        if 'ftfcontacts' in df.columns and 'totalcontacts' in df.columns:
-            invalid = (df['ftfcontacts'] > df['totalcontacts']).sum()
+        if "ftf_contacts" in df.columns and "total_contacts" in df.columns:
+            invalid = (df["ftf_contacts"] > df["total_contacts"]).sum()
             if invalid > 0:
-                issues.append(
-                    f"FTF contacts exceed total contacts in {invalid:,} rows"
-                )
+                issues.append(f"FTF contacts exceed total contacts in {invalid:,} rows")
 
         # FTF caseload contacts should not exceed total caseload contacts
-        if 'ftfcaseloadcontacts' in df.columns and 'totalcaseloadcontacts' in df.columns:
-            invalid = (df['ftfcaseloadcontacts'] > df['totalcaseloadcontacts']).sum()
+        if (
+            "ftf_caseload_contacts" in df.columns
+            and "total_caseload_contacts" in df.columns
+        ):
+            invalid = (
+                df["ftf_caseload_contacts"] > df["total_caseload_contacts"]
+            ).sum()
             if invalid > 0:
                 issues.append(
                     f"FTF caseload contacts exceed total caseload contacts in {invalid:,} rows"
@@ -473,7 +571,7 @@ class PatientDataExtractor:
         issues = []
 
         # Check for duplicate combinations of provider, service_line, and period
-        key_cols = ['providercodecurrent', 'service_line', 'periodend']
+        key_cols = ["provider_code_current", "service_line", "period_end"]
 
         if all(col in df.columns for col in key_cols):
             duplicates = df.duplicated(subset=key_cols, keep=False).sum()
@@ -485,9 +583,9 @@ class PatientDataExtractor:
 
         return len(issues) == 0, issues
 
-# -----------------------------------------------------------------
-# Date Continuity Check
-# -----------------------------------------------------------------
+    # -----------------------------------------------------------------
+    # Date Continuity Check
+    # -----------------------------------------------------------------
     def _check_date_continuity(self, df: pd.DataFrame) -> Tuple[bool, List[str]]:
         """
         Check for gaps in time series data.
@@ -500,11 +598,11 @@ class PatientDataExtractor:
         """
         issues = []
 
-        if 'periodend' not in df.columns:
+        if "period_end" not in df.columns:
             return True, issues
 
         # Get unique periods sorted
-        periods = df['periodend'].dropna().sort_values().unique()
+        periods = df["period_end"].dropna().sort_values().unique()
 
         if len(periods) < 2:
             return True, issues
@@ -538,40 +636,38 @@ class PatientDataExtractor:
         logger.info("🔍 Running data quality checks...")
 
         checks = {
-            'Schema Validation': self._check_schema,
-            'Data Completeness': self._check_data_completeness,
-            'Data Types': self._check_data_types,
-            'Data Ranges': self._check_data_ranges,
-            'Logical Consistency': self._check_logical_consistency,
-            'Duplicate Detection': self._check_duplicates,
-            'Date Continuity': self._check_date_continuity
+            "Schema Validation": self._check_schema,
+            "Data Completeness": self._check_data_completeness,
+            "Data Types": self._check_data_types,
+            "Data Ranges": self._check_data_ranges,
+            "Logical Consistency": self._check_logical_consistency,
+            "Duplicate Detection": self._check_duplicates,
+            "Date Continuity": self._check_date_continuity,
         }
 
-        results = {
-            'passed': [],
-            'failed': [],
-            'issues': {}
-        }
+        results = {"passed": [], "failed": [], "issues": {}}
 
         for check_name, check_func in checks.items():
             is_valid, issues = check_func(df)
 
             if is_valid:
-                results['passed'].append(check_name)
+                results["passed"].append(check_name)
                 logger.info(f"  ✅ {check_name}: PASSED")
             else:
-                results['failed'].append(check_name)
-                results['issues'][check_name] = issues
+                results["failed"].append(check_name)
+                results["issues"][check_name] = issues
                 logger.warning(f"  ⚠️ {check_name}: FAILED")
                 for issue in issues:
                     logger.warning(f"     - {issue}")
 
         # Summary
         total_checks = len(checks)
-        passed_checks = len(results['passed'])
-        failed_checks = len(results['failed'])
+        passed_checks = len(results["passed"])
+        failed_checks = len(results["failed"])
 
-        logger.info(f"\n📊 Quality Check Summary: {passed_checks}/{total_checks} passed")
+        logger.info(
+            f"\n📊 Quality Check Summary: {passed_checks}/{total_checks} passed"
+        )
 
         if failed_checks > 0:
             logger.warning(f"⚠️ {failed_checks} check(s) failed - review issues above")
@@ -622,20 +718,38 @@ class PatientDataExtractor:
             # Normalise column names
             df.columns = self._normalise_column_names(df.columns)
 
-            # Convert periodend to datetime
-            if 'periodend' in df.columns:
-                df['periodend'] = pd.to_datetime(df['periodend'])
+            # Convert period_end to datetime
+            if "period_end" in df.columns:
+                df["period_end"] = pd.to_datetime(df["period_end"])
+
+                # Cap to last fully completed month (prevents partial-month leakage)
+                cutoff = self.get_last_full_month_end()
+                before_rows = len(df)
+                df = df[df["period_end"].notna() & (df["period_end"] <= cutoff)]
+                removed = before_rows - len(df)
+
+                if removed > 0:
+                    logger.info(
+                        f"📅 Applied month-end cutoff at {cutoff.date()}: removed {removed:,} row(s)"
+                    )
+                logger.info(
+                    f"📅 Max period_end in extracted dataset: {df['period_end'].max().date() if not df.empty else 'N/A'}"
+                )
 
             logger.info(f"✅ Retrieved {len(df):,} rows from source views.")
-            logger.info(f"📊 Columns: {', '.join(df.columns[:5])}... ({len(df.columns)} total)")
+            logger.info(
+                f"📊 Columns: {', '.join(df.columns[:5])}... ({len(df.columns)} total)"
+            )
 
             # Run data quality checks
             if self.run_quality_checks:
                 quality_results = self.run_data_quality_checks(df)
 
                 # Optionally raise exception if critical checks fail
-                critical_checks = ['Schema Validation', 'Data Types']
-                failed_critical = [c for c in critical_checks if c in quality_results['failed']]
+                critical_checks = ["Schema Validation", "Data Types"]
+                failed_critical = [
+                    c for c in critical_checks if c in quality_results["failed"]
+                ]
 
                 if failed_critical:
                     raise DataQualityException(
@@ -648,7 +762,7 @@ class PatientDataExtractor:
             logger.error(f"❌ Error extracting data: {str(e)}")
             raise
         finally:
-            if 'cursor' in locals():
+            if "cursor" in locals():
                 cursor.close()
 
     # -----------------------------------------------------------------
@@ -702,6 +816,7 @@ class PatientDataExtractor:
         """Context manager exit."""
         self.close_connection()
 
+
 # ---------------------------------------------------------------------
 # Utility Loader
 # ---------------------------------------------------------------------
@@ -729,10 +844,11 @@ def load_patient_data(csv_path: Optional[str] = None) -> pd.DataFrame:
         raise FileNotFoundError(f"Patient data file not found at: {csv_path}")
 
     logger.info(f"📂 Loading data from: {csv_path}")
-    df = pd.read_csv(csv_path, parse_dates=["periodend"])
+    df = pd.read_csv(csv_path, parse_dates=["period_end"])
     logger.info(f"✅ Loaded {len(df):,} records with {len(df.columns)} columns")
 
     return df
+
 
 # ---------------------------------------------------------------------
 # Script Entry Point

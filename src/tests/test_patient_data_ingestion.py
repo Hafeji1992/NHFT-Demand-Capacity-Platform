@@ -1,13 +1,25 @@
 import sys
 from pathlib import Path
+
 import pandas as pd
 import pytest
 
-# Ensure src is on the path
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-sys.path.append(str(PROJECT_ROOT / "src"))
+# Ensure imports work for both:
+# - `from data_engineering...` (package import)
+# - ingestion scripts that do `from connect import ...` (module in data_engineering folder)
+#
+# Note: tests live in `src/tests`, so the repo root is `parents[2]`.
+REPO_ROOT = Path(__file__).resolve().parents[2]
+SRC_ROOT = REPO_ROOT / "src"
+DATA_ENGINEERING_ROOT = SRC_ROOT / "data_engineering"
+sys.path.insert(0, str(SRC_ROOT))
+sys.path.insert(0, str(DATA_ENGINEERING_ROOT))
 
-from data_engineering.patient_data_ingestion import PatientDataExtractor, load_patient_data, DataQualityException
+from data_engineering.patient_data_ingestion import (
+    DataQualityException,
+    PatientDataExtractor,
+    load_patient_data,
+)
 
 
 # ---------------------------------------------------------------------
@@ -28,6 +40,7 @@ class FakeCursor:
     def close(self):
         self._closed = True
 
+
 # ---------------------------------------------------------------------
 # Fake DB connection
 # ---------------------------------------------------------------------
@@ -39,38 +52,69 @@ class FakeConnection:
     def cursor(self):
         return FakeCursor(self._rows, self._columns)
 
+
 # ---------------------------------------------------------------------
 # Fake SQLServerConnection
 # ---------------------------------------------------------------------
 class FakeSQLServerConnection:
     """Replaces SQLServerConnection in tests."""
+
     def __init__(self, _config_path=None):
         pass
 
     def connect(self):
         # Build a minimal dataset that aligns with EXPECTED_COLUMNS after normalisation
         columns = [
-            "ProviderCodeCurrent", "Service_Line", "PeriodEnd",
-            "Referrals", "ClockStopActuals", "DischargesNoClockStop",
-            "ReferralClockStopRatio", "ReferralDischargedNoClockStopRatio", "DemandRatio",
-            "TotalContacts", "FTFContacts",
-            "Caseload", "TotalCaseloadContacts", "FTFCaseloadContacts",
-            "TotalContactsPerCaseload", "FTFContactsPerCaseload",
-            "Waiters", "Waiters<18Weeks", "Waiters18+Weeks",
-            "AverageLengthOfTreatment", "AverageContactsAtDischarge",
-            "AverageFTFContactsAtDischarge", "DischargesFromCaseload",
+            "provider_code_current",
+            "service_line",
+            "period_end",
+            "referrals",
+            "clock_stop_actuals",
+            "discharges_no_clock_stop",
+            "referral_clock_stop_ratio",
+            "referral_discharged_no_clock_stop_ratio",
+            "demand_ratio",
+            "total_contacts",
+            "ftf_contacts",
+            "caseload",
+            "total_caseload_contacts",
+            "ftf_caseload_contacts",
+            "total_contacts_per_caseload",
+            "ftf_contacts_per_caseload",
+            "waiters",
+            "waiters_under_18_weeks",
+            "waiters_over_18_weeks",
+            "average_length_of_treatment",
+            "average_contacts_at_discharge",
+            "average_ftf_contacts_at_discharge",
+            "discharges_from_caseload",
         ]
 
         rows = [
             (
-                "001", "Adult Acute Inpatients", "2025-01-31",
-                10, 8, 1,
-                0.8, 0.1, 1.25,
-                20, 15,
-                30, 12, 8,
-                0.4, 0.27,
-                5, 3, 2,
-                42.0, 3.5, 2.1, 7,
+                "001",
+                "Adult Acute Inpatients",
+                "2025-01-31",
+                10,
+                8,
+                1,
+                0.8,
+                0.1,
+                1.25,
+                20,
+                15,
+                30,
+                12,
+                8,
+                0.4,
+                0.27,
+                5,
+                3,
+                2,
+                42.0,
+                3.5,
+                2.1,
+                7,
             )
         ]
         return FakeConnection(rows, columns)
@@ -83,15 +127,16 @@ class FakeSQLServerConnection:
 # Unit tests - Normalise Column Names
 # ---------------------------------------------------------------------
 def test_normalise_column_names():
-    cols = ["Waiters<18Weeks", "Waiters18+Weeks", "Service Line", "FTFContacts"]
+    cols = ["WaitersUnder18Weeks", "WaitersOver18Weeks", "Service_Line", "FTFContacts"]
     normalised = PatientDataExtractor._normalise_column_names(cols)
 
     assert normalised == [
-        "waitersunder18weeks",
-        "waiters18plusweeks",
+        "waiters_under_18_weeks",
+        "waiters_over_18_weeks",
         "service_line",
-        "ftfcontacts",
+        "ftf_contacts",
     ]
+
 
 # ---------------------------------------------------------------------
 # Unit tests - Extract Patient Data
@@ -102,12 +147,12 @@ def test_extract_patient_data_with_mocked_db(monkeypatch):
     - executes the query
     - returns a DataFrame
     - normalises column names
-    - parses periodend as datetime
+    - parses period_end as datetime
     """
     # Patch SQLServerConnection inside the module scope by replacing the class it uses
     monkeypatch.setattr(
         "data_engineering.patient_data_ingestion.SQLServerConnection",
-        FakeSQLServerConnection
+        FakeSQLServerConnection,
     )
 
     extractor = PatientDataExtractor(run_quality_checks=False)
@@ -115,11 +160,12 @@ def test_extract_patient_data_with_mocked_db(monkeypatch):
 
     assert isinstance(df, pd.DataFrame)
     assert len(df) == 1
-    assert "periodend" in df.columns
-    assert pd.api.types.is_datetime64_any_dtype(df["periodend"])
+    assert "period_end" in df.columns
+    assert pd.api.types.is_datetime64_any_dtype(df["period_end"])
     assert "service_line" in df.columns
-    assert "waitersunder18weeks" in df.columns
-    assert "waiters18plusweeks" in df.columns
+    assert "waiters_under_18_weeks" in df.columns
+    assert "waiters_over_18_weeks" in df.columns
+
 
 # ---------------------------------------------------------------------
 # Unit tests - Data Quality Checks
@@ -130,7 +176,7 @@ def test_quality_checks_fail_on_schema(monkeypatch):
     """
     monkeypatch.setattr(
         "data_engineering.patient_data_ingestion.SQLServerConnection",
-        FakeSQLServerConnection
+        FakeSQLServerConnection,
     )
 
     extractor = PatientDataExtractor(run_quality_checks=True)
@@ -147,37 +193,41 @@ def test_quality_checks_fail_on_schema(monkeypatch):
     is_valid, _issues = extractor._check_schema(df)
     assert is_valid is False
 
+
 # ---------------------------------------------------------------------
 # Unit tests - Load Patient Data from CSV
 # ---------------------------------------------------------------------
 def test_load_patient_data_reads_csv(tmp_path, monkeypatch):
     """
-    load_patient_data() should load a CSV and parse periodend as datetime.
+    load_patient_data() should load a CSV and parse period_end as datetime.
     """
     test_file = tmp_path / "patient_data.csv"
 
-    df_in = pd.DataFrame({
-        "periodend": ["2025-01-31", "2025-02-28"],
-        "service_line": ["013", "013"],
-        "providercodecurrent": ["AAA", "AAA"],
-        "referrals": [10, 20],
-        "clockstopactuals": [8, 15],
-        "waiters": [5, 6],
-        "waitersunder18weeks": [3, 4],
-        "waiters18plusweeks": [2, 2],
-        "caseload": [30, 35],
-        "totalcontacts": [20, 25],
-        "ftfcontacts": [15, 18],
-        "dischargesnoclockstop": [1, 2],
-        "dischargesfromcaseload": [7, 8],
-    })
+    df_in = pd.DataFrame(
+        {
+            "period_end": ["2025-01-31", "2025-02-28"],
+            "service_line": ["Adult Inpatients Acute", "Adult Inpatients Acute"],
+            "provider_code_current": ["013", "013"],
+            "referrals": [10, 20],
+            "clock_stop_actuals": [8, 15],
+            "waiters": [5, 6],
+            "waiters_under_18_weeks": [3, 4],
+            "waiters_over_18_weeks": [2, 2],
+            "caseload": [30, 35],
+            "total_contacts": [20, 25],
+            "ftf_contacts": [15, 18],
+            "discharges_no_clock_stop": [1, 2],
+            "discharges_from_caseload": [7, 8],
+        }
+    )
     df_in.to_csv(test_file, index=False)
 
     df_out = load_patient_data(str(test_file))
 
     assert len(df_out) == 2
-    assert pd.api.types.is_datetime64_any_dtype(df_out["periodend"])
+    assert pd.api.types.is_datetime64_any_dtype(df_out["period_end"])
     assert df_out["referrals"].sum() == 30
+
 
 # ---------------------------------------------------------------------
 # Unit tests - Load Patient Data - Missing File
@@ -186,3 +236,7 @@ def test_load_patient_data_missing_file_raises(tmp_path):
     missing = tmp_path / "does_not_exist.csv"
     with pytest.raises(FileNotFoundError):
         load_patient_data(str(missing))
+
+
+if __name__ == "__main__":
+    raise SystemExit(pytest.main([__file__]))

@@ -5,7 +5,6 @@ Interactive Dash application for visualising demand and capacity data.
 """
 
 import logging
-from pathlib import Path
 from typing import Optional
 from io import StringIO
 
@@ -22,9 +21,10 @@ from data_handler import get_data_handler, DataHandler
 # ---------------------------------------------------------------------
 # Logging Configuration
 # ---------------------------------------------------------------------
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
+if not logging.getLogger().handlers:
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+    )
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------
@@ -32,7 +32,6 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------
 try:
     data_handler = get_data_handler()
-    logger.info("✅ Data handler initialised successfully")
 except Exception as e:
     logger.error(f"❌ Failed to initialise data handler: {e}")
     data_handler = None
@@ -51,6 +50,44 @@ app = dash.Dash(
 # ---------------------------------------------------------------------
 # Helper Functions
 # ---------------------------------------------------------------------
+def prettify_column_name(column_id: str) -> str:
+    """Format column headers into user-friendly table headers.
+
+    Rules:
+    - Converts snake_case / kebab-case into spaced words.
+    - Title-cases human-entered headers too (e.g., "referral contacts" -> "Referral Contacts").
+    - Uppercases 3-letter alphabetic tokens to preserve acronyms (e.g., ftf -> FTF).
+    - Preserves already-uppercase tokens (e.g., NHS, WTE).
+    """
+
+    raw = str(column_id)
+    normalised = raw.replace("_", " ").replace("-", " ")
+    parts: list[str] = [p for p in normalised.split() if p]
+
+    pretty_parts: list[str] = []
+    for part in parts:
+        if part.isdigit():
+            pretty_parts.append(part)
+            continue
+
+        if part.isalpha():
+            if part.isupper():
+                pretty_parts.append(part)
+                continue
+
+            if len(part) == 3:
+                pretty_parts.append(part.upper())
+                continue
+
+            pretty_parts.append(part[:1].upper() + part[1:].lower())
+            continue
+
+        # For tokens with punctuation (e.g., "A/B"), leave unchanged.
+        pretty_parts.append(part)
+
+    return " ".join(pretty_parts)
+
+
 def create_metric_card(
     title: str, value: str, icon: str = "📊", color: str = "primary"
 ):
@@ -100,17 +137,17 @@ def create_filter_section():
 
     # Build dropdown options from patient data.
     # UX: show the full service_line label (user-friendly)
-    # Behaviour: filter by providercodecurrent (filters both patient + staffing reliably)
+    # Behaviour: filter by provider_code_current (filters both patient + staffing reliably)
     if data_handler.patient_df is not None:
         service_line_data = (
-            data_handler.patient_df[["providercodecurrent", "service_line"]]
+            data_handler.patient_df[["provider_code_current", "service_line"]]
             .drop_duplicates()
-            .sort_values(["providercodecurrent", "service_line"])
+            .sort_values(["provider_code_current", "service_line"])
         )
         service_line_options = [
             {
-                "label": f"{row['providercodecurrent']} - {row['service_line']}",
-                "value": f"{row['providercodecurrent']}|{row['service_line']}",
+                "label": f"{row['provider_code_current']} - {row['service_line']}",
+                "value": f"{row['provider_code_current']}|{row['service_line']}",
             }
             for _, row in service_line_data.iterrows()
         ]
@@ -263,7 +300,7 @@ def filter_data(n_clicks, start_date, end_date, service_lines):
         start_date: Start date (YYYY-MM-DD) from the date picker.
         end_date: End date (YYYY-MM-DD) from the date picker.
         service_lines: List of selected dropdown values in the form
-            "providercodecurrent|service_line".
+            "provider_code_current|service_line".
 
     Returns:
         JSON-encoded filtered patient DataFrame (orient="split"), or None if data
@@ -281,7 +318,7 @@ def filter_data(n_clicks, start_date, end_date, service_lines):
     if service_lines:
         # Users select service labels, but we filter by provider code only.
         selected_providers = sorted({item.split("|")[0] for item in service_lines})
-        df = df[df["providercodecurrent"].astype(str).isin(selected_providers)]
+        df = df[df["provider_code_current"].astype(str).isin(selected_providers)]
 
     # Store as JSON
     return df.to_json(date_format="iso", orient="split")
@@ -310,15 +347,15 @@ def update_summary_stats(data_json):
             "No data matches the selected filters", className="alert alert-info"
         )
 
-    # Ensure periodend is datetime
-    df["periodend"] = pd.to_datetime(df["periodend"])
+    # Ensure period_end is datetime
+    df["period_end"] = pd.to_datetime(df["period_end"])
 
     # Calculate metrics across the entire selected date range
     total_referrals = int(df["referrals"].sum())
     total_waiters = int(df["waiters"].sum())
     total_caseload = int(df["caseload"].sum())
-    total_contacts = int(df["totalcontacts"].sum())
-    total_discharges = int(df["dischargesfromcaseload"].sum())
+    total_contacts = int(df["total_contacts"].sum())
+    total_discharges = int(df["discharges_from_caseload"].sum())
 
     return dbc.Row(
         [
@@ -355,30 +392,30 @@ def update_summary_stats(data_json):
     Output("footer-content", "children"), [Input("filtered-data-store", "data")]
 )
 def update_footer(data_json):
-    """Update footer text, including the latest period end date.
+    """Update footer text, including the latest reporting period end date.
 
     Args:
         data_json: JSON-encoded DataFrame (orient="split") from dcc.Store.
 
     Returns:
-        A Dash HTML paragraph element with the refresh date.
+        A Dash HTML paragraph element with the latest reporting period end date.
     """
     if data_json is None or data_handler is None:
-        latest_date = "N/A"
+        latest_period_end = "N/A"
     else:
         df = pd.read_json(StringIO(data_json), orient="split")
 
         if not df.empty:
-            df["periodend"] = pd.to_datetime(df["periodend"])
-            latest_date = df["periodend"].max().strftime("%d %B %Y")
+            df["period_end"] = pd.to_datetime(df["period_end"])
+            latest_period_end = df["period_end"].max().strftime("%d %B %Y")
         else:
-            latest_date = "N/A"
+            latest_period_end = "N/A"
 
     return html.P(
         [
             "© 2025 Northamptonshire Healthcare NHS Foundation Trust | ",
             "BI Development Team | ",
-            html.Strong(f"Data Last Refreshed: {latest_date}"),
+            html.Strong(f"Latest Reporting Period End: {latest_period_end}"),
         ],
         className="text-center text-muted mb-0",
     )
@@ -407,7 +444,7 @@ def update_tab_content(active_tab, data_json):
 
     df = pd.read_json(StringIO(data_json), orient="split")
 
-    df["periodend"] = pd.to_datetime(df["periodend"])
+    df["period_end"] = pd.to_datetime(df["period_end"])
 
     if df.empty:
         return html.Div(
@@ -437,7 +474,7 @@ def create_overview_tab(df):
     # -----------------------------
     # Key Metrics (Time series chart)
     # -----------------------------
-    df_sorted = df.sort_values("periodend")
+    df_sorted = df.sort_values("period_end")
 
     monthly = (
         df_sorted.groupby("year_month")
@@ -446,9 +483,9 @@ def create_overview_tab(df):
                 "referrals": "sum",
                 "waiters": "sum",
                 "caseload": "sum",
-                "dischargesfromcaseload": "sum",
-                "totalcontacts": "sum",
-                "clockstopactuals": "sum",
+                "discharges_from_caseload": "sum",
+                "total_contacts": "sum",
+                "clock_stop_actuals": "sum",
             }
         )
         .reset_index()
@@ -462,9 +499,9 @@ def create_overview_tab(df):
         ("Referrals", "referrals"),
         ("Waiters", "waiters"),
         ("Caseload", "caseload"),
-        ("Contacts", "totalcontacts"),
-        ("Discharges", "dischargesfromcaseload"),
-        ("Clock Stop Actuals", "clockstopactuals"),
+        ("Contacts", "total_contacts"),
+        ("Discharges", "discharges_from_caseload"),
+        ("Clock Stop Actuals", "clock_stop_actuals"),
     ]
 
     for i, (label, col) in enumerate(series):
@@ -472,7 +509,7 @@ def create_overview_tab(df):
             continue
 
         # Only show Referrals + Clock Stop Actuals by default; keep others selectable.
-        default_visible = col in {"referrals", "clockstopactuals"}
+        default_visible = col in {"referrals", "clock_stop_actuals"}
         color = palette[i % len(palette)]
 
         # Line trace
@@ -555,8 +592,8 @@ def create_overview_tab(df):
     # 18-week waiters split (stacked bar)
     # -----------------------------
     waiters_18wk = df_sorted.groupby("year_month", as_index=False).agg(
-        waitersunder18weeks=("waitersunder18weeks", "sum"),
-        waiters18plusweeks=("waiters18plusweeks", "sum"),
+        waiters_under_18_weeks=("waiters_under_18_weeks", "sum"),
+        waiters_over_18_weeks=("waiters_over_18_weeks", "sum"),
     )
 
     fig_18wk = go.Figure()
@@ -564,7 +601,7 @@ def create_overview_tab(df):
     fig_18wk.add_trace(
         go.Bar(
             x=waiters_18wk["year_month"],
-            y=waiters_18wk["waitersunder18weeks"],
+            y=waiters_18wk["waiters_under_18_weeks"],
             name="Under 18 Weeks",
             marker_color="#636EFA",  # Plotly blue
             hovertemplate="%{fullData.name}: <b>%{y:,}</b><extra></extra>",
@@ -574,7 +611,7 @@ def create_overview_tab(df):
     fig_18wk.add_trace(
         go.Bar(
             x=waiters_18wk["year_month"],
-            y=waiters_18wk["waiters18plusweeks"],
+            y=waiters_18wk["waiters_over_18_weeks"],
             name="18+ Weeks",
             marker_color="#EF553B",  # Plotly red
             hovertemplate="%{fullData.name}: <b>%{y:,}</b><extra></extra>",
@@ -661,14 +698,14 @@ def create_service_line_summary_table(df: pd.DataFrame):
         df: Filtered patient dataset.
 
     Returns:
-        A Dash DataTable where rows are (providercodecurrent, service_line) and
+        A Dash DataTable where rows are (provider_code_current, service_line) and
         numeric metrics are aggregated by sum.
     """
     exclude_cols = {
         # Keep these as identifier columns rather than aggregated numeric metrics
-        "providercodecurrent",
+        "provider_code_current",
         "service_line",
-        "periodend",
+        "period_end",
         "year",
         "month",
         "quarter",
@@ -681,23 +718,49 @@ def create_service_line_summary_table(df: pd.DataFrame):
     ]
 
     summary_df = (
-        df.groupby(["providercodecurrent", "service_line"])[summary_columns]
+        df.groupby(["provider_code_current", "service_line"])[summary_columns]
         .sum()
         .reset_index()
         .round(0)
-        .sort_values(["providercodecurrent", "service_line"])
+        .sort_values(["provider_code_current", "service_line"])
     )
 
     return dash_table.DataTable(
+        id="patient-summary-table",
         data=summary_df.to_dict("records"),
-        columns=[{"name": i, "id": i} for i in summary_df.columns],
+        columns=[
+            {"name": prettify_column_name(i), "id": i} for i in summary_df.columns
+        ],
+        fixed_rows={"headers": True},
+        fixed_columns={"headers": True, "data": 2},
         sort_action="native",
-        style_table={"overflowX": "auto"},
+        style_table={
+            "width": "100%",
+            "minWidth": "100%",
+            "overflowX": "auto",
+            "maxHeight": "520px",
+            "overflowY": "auto",
+        },
         style_cell={
             "textAlign": "left",
             "padding": "10px",
+            "minWidth": "120px",
+            "maxWidth": "240px",
+            "whiteSpace": "normal",
         },
-        style_header={"backgroundColor": "rgb(230, 230, 230)", "fontWeight": "bold"},
+        style_cell_conditional=[
+            {
+                "if": {"column_id": "service_line"},
+                "minWidth": "180px",
+                "maxWidth": "320px",
+            }
+        ],
+        style_header={
+            "backgroundColor": "rgb(230, 230, 230)",
+            "fontWeight": "bold",
+            "whiteSpace": "normal",
+            "height": "auto",
+        },
         style_data_conditional=[
             {"if": {"row_index": "odd"}, "backgroundColor": "rgb(248, 248, 248)"}
         ],
@@ -715,7 +778,7 @@ def create_staffing_pivot_table(
         staffing_df: Staffing dataset (typically data_handler.staffing_df).
 
     Returns:
-        A Dash DataTable pivoted to one row per (providercodecurrent, service_line)
+        A Dash DataTable pivoted to one row per (provider_code_current, service_line)
         and one column per staff_group, or an alert div if data is missing.
     """
     if staffing_df is None or staffing_df.empty:
@@ -724,7 +787,7 @@ def create_staffing_pivot_table(
             className="alert alert-warning",
         )
 
-    required_cols = {"providercodecurrent", "service_line", "staff_group", "staff"}
+    required_cols = {"provider_code_current", "service_line", "staff_group", "staff"}
     if not required_cols.issubset(set(staffing_df.columns)):
         missing = sorted(required_cols - set(staffing_df.columns))
         return html.Div(
@@ -736,16 +799,16 @@ def create_staffing_pivot_table(
     if (
         patient_df is not None
         and not patient_df.empty
-        and "providercodecurrent" in patient_df.columns
+        and "provider_code_current" in patient_df.columns
     ):
         selected_providers = (
-            patient_df["providercodecurrent"].dropna().astype(str).unique().tolist()
+            patient_df["provider_code_current"].dropna().astype(str).unique().tolist()
         )
 
     staffing_filtered = staffing_df.copy()
     if selected_providers:
         staffing_filtered = staffing_filtered[
-            staffing_filtered["providercodecurrent"]
+            staffing_filtered["provider_code_current"]
             .astype(str)
             .isin(selected_providers)
         ]
@@ -762,11 +825,11 @@ def create_staffing_pivot_table(
 
     pivot_df = (
         staffing_filtered.groupby(
-            ["providercodecurrent", "service_line", "staff_group"], as_index=False
+            ["provider_code_current", "service_line", "staff_group"], as_index=False
         )
         .agg(staff=("staff", "sum"))
         .pivot(
-            index=["providercodecurrent", "service_line"],
+            index=["provider_code_current", "service_line"],
             columns="staff_group",
             values="staff",
         )
@@ -775,11 +838,11 @@ def create_staffing_pivot_table(
     )
 
     # Keep columns stable-ish: identifiers first, then alphabetical staff groups
-    id_cols = ["providercodecurrent", "service_line"]
+    id_cols = ["provider_code_current", "service_line"]
     non_index_cols = [c for c in pivot_df.columns if c not in id_cols]
     pivot_df = pivot_df[id_cols + sorted(non_index_cols, key=lambda x: str(x))]
 
-    pivot_df = pivot_df.sort_values(["providercodecurrent", "service_line"])
+    pivot_df = pivot_df.sort_values(["provider_code_current", "service_line"])
 
     # Render integers when possible
     for col in non_index_cols:
@@ -789,10 +852,29 @@ def create_staffing_pivot_table(
             pivot_df[col] = pivot_df[col].round(0)
 
     return dash_table.DataTable(
+        id="staffing-pivot-table",
         data=pivot_df.to_dict("records"),
-        columns=[{"name": str(i), "id": str(i)} for i in pivot_df.columns],
+        columns=[
+            {
+                "name": (
+                    prettify_column_name(str(i))
+                    if str(i) in {"provider_code_current", "service_line"}
+                    else str(i)
+                ),
+                "id": str(i),
+            }
+            for i in pivot_df.columns
+        ],
+        fixed_rows={"headers": True},
+        fixed_columns={"headers": True, "data": 2},
         sort_action="native",
-        style_table={"overflowX": "auto"},
+        style_table={
+            "width": "100%",
+            "minWidth": "100%",
+            "overflowX": "auto",
+            "maxHeight": "520px",
+            "overflowY": "auto",
+        },
         style_cell={
             "textAlign": "left",
             "padding": "10px",
@@ -800,7 +882,19 @@ def create_staffing_pivot_table(
             "maxWidth": "240px",
             "whiteSpace": "normal",
         },
-        style_header={"backgroundColor": "rgb(230, 230, 230)", "fontWeight": "bold"},
+        style_cell_conditional=[
+            {
+                "if": {"column_id": "service_line"},
+                "minWidth": "180px",
+                "maxWidth": "320px",
+            }
+        ],
+        style_header={
+            "backgroundColor": "rgb(230, 230, 230)",
+            "fontWeight": "bold",
+            "whiteSpace": "normal",
+            "height": "auto",
+        },
         style_data_conditional=[
             {"if": {"row_index": "odd"}, "backgroundColor": "rgb(248, 248, 248)"}
         ],
@@ -914,4 +1008,6 @@ if __name__ == "__main__":
     logger.info("Starting NHFT Demand-Capacity Dashboard...")
     logger.info("Dashboard will be available at: http://127.0.0.1:8050/")
 
-    app.run(debug=True, host="127.0.0.1", port=8050)
+    # Flask's debug reloader starts the app twice (parent + child). Disable it to
+    # prevent duplicate startup logs while keeping debug mode features.
+    app.run(debug=True, host="127.0.0.1", port=8050, use_reloader=False)
