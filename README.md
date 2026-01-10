@@ -187,19 +187,21 @@ As defined in the Project Plan (Section 2, p. 1) :
 
 ## 12. Project Status
 
-| Workstream / Phase                         | Status        | Target Completion | Notes |
-|--------------------------------------------|--------------|-------------------|--------|
-| Project Documentation & Governance         | ✅ Completed | Early Dec 2025    | Project Agreement, Plan, Methodology, Ethics & Legal all completed |
-| Data Access & Infrastructure Setup         | ⏳ Pending   | Mid Dec 2025      | SQL access, governance approvals, secure Python environment |
-| Data Engineering & Automation Pipeline     | ⏳ Upcoming  | Early Jan 2026    | Direct-query pipeline and validation scripts |
-| Forecasting Module (MVP)                   | ⏳ Upcoming  | Early Feb 2026    | ARIMA/ETS/XGB models and selection logic |
-| Capacity & Simulation Module               | ⏳ Upcoming  | Mid Feb 2026      | Queueing and simulation with SimPy |
-| Dash Application Development               | ⏳ Upcoming  | End Feb 2026      | Interactive dashboard with scenarios |
-| Testing, Validation & Refinement           | ⏳ Upcoming  | End Feb 2026      | Forecast evaluation, stakeholder testing |
-| Documentation & Final Presentation Prep    | ⏳ Upcoming  | June 2026         | Written portfolio, slides, video pitch |
-
+| Workstream / Phase                      | Status        | Target Completion | Completion Date | Hours Spent | Notes |
+|----------------------------------------|--------------|-------------------|-----------------|-------------|--------|
+| Project Documentation & Governance     | ✅ Completed | Early Dec 2025    | 08/12/2025      | 30          | Project Agreement, Plan, Methodology, Ethics & Legal all completed |
+| Data Access & Infrastructure Setup     | ✅ Completed | Mid Dec 2025      | 15/12/2025      | 15          | SQL access, governance approvals, secure Python environment |
+| Data Engineering & Automation Pipeline | ✅ Completed | Early Jan 2026    | 22/12/2025      | 30          | Direct-query pipeline, validation scripts, staffing & demand ingestion |
+| Forecasting Module (MVP)               | ⏳ Upcoming  | Early Feb 2026    | —               | —           | ARIMA/ETS/XGB models and selection logic |
+| Capacity & Simulation Module           | ⏳ Upcoming  | Mid Feb 2026      | —               | —           | Queueing and simulation with SimPy |
+| Dash Application Development           | ⏳ Upcoming  | End Feb 2026      | —               | —           | Interactive dashboard with scenarios |
+| Testing, Validation & Refinement       | ⏳ Upcoming  | End Feb 2026      | —               | —           | Forecast evaluation, stakeholder testing |
+| Documentation & Final Presentation Prep| ⏳ Upcoming  | June 2026         | —               | —           | Written portfolio, slides, video pitch |
 
 Milestones taken from the Project Plan timeline (Section 6, pp. 3–4) .
+
+**Target Hours:**  
+The total time available for this project is approximately **six working weeks**, equivalent to **~225 hours** (based on a standard 37.5-hour working week). The hours spent column will be updated as the project progresses.
 
 ## 13. License
 
