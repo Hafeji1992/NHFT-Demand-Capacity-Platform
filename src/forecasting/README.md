@@ -134,6 +134,29 @@ frame_12 = make_forecast_frame(
 )
 ```
 
+## Console report (business case walkthrough)
+
+To generate a console-based report that includes:
+
+- ADF test output
+- AIC grid search (model selection) + justification
+- Model fit summary
+- Multi-step forecast with 95% confidence intervals
+
+Run:
+
+```bash
+python src/forecasting/sarima_console_report.py --metric referrals
+```
+
+Optional examples:
+
+```bash
+python src/forecasting/sarima_console_report.py --metric waiters --months-ahead 6
+python src/forecasting/sarima_console_report.py --csv data/staffing_data.csv --metric staff --date-col period_end
+python src/forecasting/sarima_console_report.py --metric referrals --show-warnings
+```
+
 ## Important caveats
 
 - Forecasts are only as good as the historical signal; sudden operational changes (policy, service redesign, data definition changes) may not be captured.
