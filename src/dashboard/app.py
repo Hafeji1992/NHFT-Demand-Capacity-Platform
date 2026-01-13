@@ -1184,6 +1184,7 @@ def create_service_line_summary_table(df: pd.DataFrame):
         "demand_ratio",
         "total_contacts_per_caseload",
         "ftf_contacts_per_caseload",
+        "clearance_time_months",
     ]
 
     def _safe_div(numer: pd.Series, denom: pd.Series) -> pd.Series:
@@ -1203,6 +1204,37 @@ def create_service_line_summary_table(df: pd.DataFrame):
     for base in base_needed:
         if base not in summary_df.columns:
             summary_df[base] = pd.NA
+
+    # "Current" values for clearance time are taken from the latest available period
+    # per provider/service line within the filtered dataset.
+    current_caseload = pd.Series(pd.NA, index=summary_df.index)
+    current_clock_stops = pd.Series(pd.NA, index=summary_df.index)
+    if (
+        "period_end" in df.columns
+        and "caseload" in df.columns
+        and "clock_stop_actuals" in df.columns
+    ):
+        latest = (
+            df.copy()
+            .assign(period_end=pd.to_datetime(df["period_end"], errors="coerce"))
+            .sort_values("period_end")
+            .groupby(["provider_code_current", "service_line"], dropna=False)
+            .tail(1)
+        )
+
+        latest = latest[["provider_code_current", "service_line", "caseload", "clock_stop_actuals"]]
+        latest["caseload"] = pd.to_numeric(latest["caseload"], errors="coerce")
+        latest["clock_stop_actuals"] = pd.to_numeric(
+            latest["clock_stop_actuals"], errors="coerce"
+        )
+
+        merged_latest = summary_df[["provider_code_current", "service_line"]].merge(
+            latest,
+            on=["provider_code_current", "service_line"],
+            how="left",
+        )
+        current_caseload = merged_latest["caseload"]
+        current_clock_stops = merged_latest["clock_stop_actuals"]
 
     summary_df["referral_clock_stop_ratio"] = _safe_div(
         summary_df["clock_stop_actuals"], summary_df["referrals"]
@@ -1224,6 +1256,10 @@ def create_service_line_summary_table(df: pd.DataFrame):
     summary_df["ftf_contacts_per_caseload"] = _safe_div(
         summary_df["ftf_caseload_contacts"], summary_df["caseload"]
     )
+
+    # Clearance time (months): how long to clear the *current* caseload if no new
+    # referrals arrived, at the current clock stop rate.
+    summary_df["clearance_time_months"] = _safe_div(current_caseload, current_clock_stops)
 
     # Preserve existing behaviour for aggregated numeric metrics (rounded to 0),
     # but keep derived ratios with meaningful decimals.
@@ -1247,6 +1283,14 @@ def create_service_line_summary_table(df: pd.DataFrame):
         except Exception:
             pass
 
+    # Clearance time reads better with fewer decimals
+    try:
+        summary_df["clearance_time_months"] = pd.to_numeric(
+            summary_df["clearance_time_months"], errors="coerce"
+        ).round(2)
+    except Exception:
+        pass
+
     # Keep ratio columns near related activity measures if present
     preferred_order = [
         "provider_code_current",
@@ -1260,6 +1304,7 @@ def create_service_line_summary_table(df: pd.DataFrame):
         "total_contacts",
         "ftf_contacts",
         "caseload",
+        "clearance_time_months",
         "total_caseload_contacts",
         "ftf_caseload_contacts",
         "total_contacts_per_caseload",
