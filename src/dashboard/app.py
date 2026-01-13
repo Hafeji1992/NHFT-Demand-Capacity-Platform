@@ -96,6 +96,15 @@ app = dash.Dash(
 
 
 # ---------------------------------------------------------------------
+# Demand Target (UI defaults)
+# ---------------------------------------------------------------------
+# Target is plotted as a constant line = (pct/100) * max(referrals)
+# for the currently filtered service(s).
+DEFAULT_DEMAND_TARGET_PCT = 90
+DEMAND_TARGET_OPTIONS = list(range(0, 100, 5))  # 0, 5, ..., 95
+
+
+# ---------------------------------------------------------------------
 # Helper Functions
 # ---------------------------------------------------------------------
 def prettify_column_name(column_id: str) -> str:
@@ -335,24 +344,6 @@ app.layout = dbc.Container(
                             ],
                             className="mb-3",
                         ),
-                        dbc.Row(
-                            [
-                                dbc.Col(
-                                    dbc.Switch(
-                                        id="forecast-toggle",
-                                        label="Forecast (SARIMA, 95% CI)",
-                                        value=False,
-                                    ),
-                                    width="auto",
-                                    style={
-                                        # Align this control with the chart legend region
-                                        "marginLeft": "auto",
-                                        "marginRight": "200px",
-                                    },
-                                )
-                            ],
-                            className="mb-2",
-                        ),
                         # Tab Content
                         html.Div(id="tab-content"),
                     ],
@@ -556,14 +547,6 @@ def update_tab_content(active_tab, data_json):
     return html.Div("Invalid tab selection")
 
 
-@app.callback(
-    Output("forecast-toggle", "disabled"),
-    [Input("main-tabs", "value")],
-)
-def disable_forecast_toggle_when_not_overview(active_tab: str) -> bool:
-    return active_tab != "overview-tab"
-
-
 def create_overview_tab(df):
     """Create the Overview tab layout.
 
@@ -654,6 +637,51 @@ def create_overview_tab(df):
                 hoverinfo="skip",
             )
         )
+
+    # Optional constant planning target line: pct * max(referrals)
+    try:
+        if "referrals" in monthly.columns:
+            max_referrals = pd.to_numeric(monthly["referrals"], errors="coerce").max()
+            if (
+                pd.notna(max_referrals)
+                and float(max_referrals) >= 0
+                and len(monthly_x) > 0
+            ):
+                pct = float(DEFAULT_DEMAND_TARGET_PCT)
+                target_value = float(max_referrals) * (pct / 100.0)
+                target_color = "rgba(30,30,30,0.9)"
+
+                # Default to legend-only so it doesn't clutter the view
+                target_visible = "legendonly"
+
+                fig_timeseries.add_trace(
+                    go.Scatter(
+                        x=monthly_x,
+                        y=[target_value] * len(monthly_x),
+                        name=f"Clock Stop Target ({pct:.0f}% of max Referrals)",
+                        legendgroup="clock_stop_target",
+                        showlegend=False,
+                        mode="lines",
+                        visible=target_visible,
+                        line=dict(width=2, dash="dot", color=target_color),
+                        hovertemplate="%{fullData.name}: <b>%{y:,.0f}</b><extra></extra>",
+                    )
+                )
+                fig_timeseries.add_trace(
+                    go.Scatter(
+                        x=monthly_x,
+                        y=[target_value] * len(monthly_x),
+                        name=f"Clock Stop Target ({pct:.0f}% of max Referrals)",
+                        legendgroup="clock_stop_target",
+                        showlegend=True,
+                        mode="markers",
+                        visible=target_visible,
+                        marker=dict(size=9, color=target_color, symbol="diamond"),
+                        hoverinfo="skip",
+                    )
+                )
+    except Exception as e:
+        logger.warning(f"⚠️ Clock Stop Target skipped in overview init: {e}")
 
     fig_timeseries.update_layout(
         title=dict(
@@ -793,6 +821,54 @@ def create_overview_tab(df):
     # -----------------------------
     return html.Div(
         [
+            dbc.Row(
+                [
+                    dbc.Col(
+                        html.Div(
+                            [
+                                html.Span(
+                                    "Select Demand Percentile",
+                                    style={"marginRight": "10px"},
+                                ),
+                                dcc.Dropdown(
+                                    id="demand-target-percentile",
+                                    options=[
+                                        {
+                                            "label": f"{p}% of max",
+                                            "value": int(p),
+                                        }
+                                        for p in DEMAND_TARGET_OPTIONS
+                                    ],
+                                    value=DEFAULT_DEMAND_TARGET_PCT,
+                                    clearable=False,
+                                    searchable=False,
+                                    style={"width": "200px"},
+                                ),
+                            ],
+                            style={
+                                "display": "flex",
+                                "alignItems": "center",
+                            },
+                        ),
+                        width="auto",
+                        style={
+                            "marginLeft": "auto",
+                        },
+                    ),
+                    dbc.Col(
+                        dbc.Switch(
+                            id="forecast-toggle",
+                            label="Forecast (SARIMA, 95% CI)",
+                            value=False,
+                        ),
+                        width="auto",
+                        style={
+                            "marginRight": "200px",
+                        },
+                    ),
+                ],
+                className="mb-2",
+            ),
             # Main time series chart
             dbc.Row(
                 [
@@ -814,11 +890,14 @@ def create_overview_tab(df):
     [
         Input("filtered-data-store", "data"),
         Input("forecast-toggle", "value"),
+        Input("demand-target-percentile", "value"),
         Input("key-metrics-timeseries", "restyleData"),
     ],
     [State("key-metrics-timeseries", "figure")],
 )
-def update_key_metrics_timeseries(data_json, forecast_on, _restyle_data, current_fig):
+def update_key_metrics_timeseries(
+    data_json, forecast_on, demand_target_percentile, _restyle_data, current_fig
+):
     """Update the key metrics time series chart.
 
     - Keeps current legend selections (via `current_fig`).
@@ -1065,6 +1144,55 @@ def update_key_metrics_timeseries(data_json, forecast_on, _restyle_data, current
                 logger.warning(f"⚠️ Forecast skipped for '{col}': {e}")
                 forecast_errors.append(f"{label}: {type(e).__name__}")
 
+    # Clock Stop Target (constant line based on selected pct of max referrals)
+    try:
+        pct = (
+            DEFAULT_DEMAND_TARGET_PCT
+            if demand_target_percentile is None
+            else float(demand_target_percentile)
+        )
+        pct = max(0.0, min(100.0, pct))
+        if "referrals" in monthly.columns:
+            max_referrals = pd.to_numeric(monthly["referrals"], errors="coerce").max()
+            if (
+                pd.notna(max_referrals)
+                and float(max_referrals) >= 0
+                and len(x_actual) > 0
+            ):
+                target_value = float(max_referrals) * (pct / 100.0)
+                target_color = "rgba(30,30,30,0.9)"
+
+                target_visible = group_visibility.get("clock_stop_target", "legendonly")
+
+                fig.add_trace(
+                    go.Scatter(
+                        x=x_actual,
+                        y=[target_value] * len(x_actual),
+                        name=f"Clock Stop Target ({pct:.0f}% of max Referrals)",
+                        legendgroup="clock_stop_target",
+                        showlegend=False,
+                        mode="lines",
+                        visible=target_visible,
+                        line=dict(width=2, dash="dot", color=target_color),
+                        hovertemplate="%{fullData.name}: <b>%{y:,.0f}</b><extra></extra>",
+                    )
+                )
+                fig.add_trace(
+                    go.Scatter(
+                        x=x_actual,
+                        y=[target_value] * len(x_actual),
+                        name=f"Clock Stop Target ({pct:.0f}% of max Referrals)",
+                        legendgroup="clock_stop_target",
+                        showlegend=True,
+                        mode="markers",
+                        visible=target_visible,
+                        marker=dict(size=9, color=target_color, symbol="diamond"),
+                        hoverinfo="skip",
+                    )
+                )
+    except Exception as e:
+        logger.warning(f"⚠️ Clock Stop Target skipped: {e}")
+
     fig.update_layout(
         title=dict(
             text="Key Metrics Over Time",
@@ -1222,7 +1350,9 @@ def create_service_line_summary_table(df: pd.DataFrame):
             .tail(1)
         )
 
-        latest = latest[["provider_code_current", "service_line", "caseload", "clock_stop_actuals"]]
+        latest = latest[
+            ["provider_code_current", "service_line", "caseload", "clock_stop_actuals"]
+        ]
         latest["caseload"] = pd.to_numeric(latest["caseload"], errors="coerce")
         latest["clock_stop_actuals"] = pd.to_numeric(
             latest["clock_stop_actuals"], errors="coerce"
@@ -1259,7 +1389,9 @@ def create_service_line_summary_table(df: pd.DataFrame):
 
     # Clearance time (months): how long to clear the *current* caseload if no new
     # referrals arrived, at the current clock stop rate.
-    summary_df["clearance_time_months"] = _safe_div(current_caseload, current_clock_stops)
+    summary_df["clearance_time_months"] = _safe_div(
+        current_caseload, current_clock_stops
+    )
 
     # Preserve existing behaviour for aggregated numeric metrics (rounded to 0),
     # but keep derived ratios with meaningful decimals.
