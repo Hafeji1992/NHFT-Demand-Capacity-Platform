@@ -556,6 +556,15 @@ def create_overview_tab(df):
         .reset_index()
     )
 
+    # Use a real datetime x-axis at month-end so forecast + actuals join smoothly.
+    # Keep month bucket labels in hover/ticks via formatting.
+    try:
+        monthly_x = pd.PeriodIndex(
+            monthly["year_month"].astype(str), freq="M"
+        ).to_timestamp("M")
+    except Exception:
+        monthly_x = monthly["year_month"].astype(str)
+
     fig_timeseries = go.Figure()
 
     # Use Plotly's default qualitative palette for consistent, accessible colours
@@ -580,7 +589,7 @@ def create_overview_tab(df):
         # Line trace
         fig_timeseries.add_trace(
             go.Scatter(
-                x=monthly["year_month"],
+                x=monthly_x,
                 y=monthly[col],
                 name=label,
                 legendgroup=col,
@@ -596,7 +605,7 @@ def create_overview_tab(df):
         # Marker trace (legend entry shown as circle only)
         fig_timeseries.add_trace(
             go.Scatter(
-                x=monthly["year_month"],
+                x=monthly_x,
                 y=monthly[col],
                 name=label,
                 legendgroup=col,
@@ -645,6 +654,9 @@ def create_overview_tab(df):
         tickangle=-30,
         ticks="outside",
         ticklen=6,
+        dtick="M1",
+        tickformat="%Y-%m",
+        hoverformat="%Y-%m",
     )
     fig_timeseries.update_yaxes(
         tickformat=",",
@@ -801,6 +813,14 @@ def update_key_metrics_timeseries(data_json, forecast_on, _restyle_data, current
         .reset_index()
     )
 
+    # Use real datetime points (month-end) for both actuals and forecasts.
+    try:
+        x_actual = pd.PeriodIndex(
+            monthly["year_month"].astype(str), freq="M"
+        ).to_timestamp("M")
+    except Exception:
+        x_actual = monthly["year_month"].astype(str)
+
     # Extract current legend visibility state (so toggling forecast doesn't reset selections)
     group_visibility = {}
     if isinstance(current_fig, dict):
@@ -810,13 +830,8 @@ def update_key_metrics_timeseries(data_json, forecast_on, _restyle_data, current
                 if group:
                     group_visibility[group] = tr.get("visible", True)
 
-    # Build a monthly datetime index for forecasting.
-    try:
-        monthly_dt_index = pd.PeriodIndex(
-            monthly["year_month"].astype(str), freq="M"
-        ).to_timestamp("M")
-    except Exception:
-        monthly_dt_index = None
+    # Build a monthly datetime index for forecasting (month-end).
+    monthly_dt_index = x_actual if isinstance(x_actual, pd.DatetimeIndex) else None
 
     fig = go.Figure()
 
@@ -845,7 +860,7 @@ def update_key_metrics_timeseries(data_json, forecast_on, _restyle_data, current
         # Actuals line
         fig.add_trace(
             go.Scatter(
-                x=monthly["year_month"],
+                x=x_actual,
                 y=monthly[col],
                 name=label,
                 legendgroup=col,
@@ -860,7 +875,7 @@ def update_key_metrics_timeseries(data_json, forecast_on, _restyle_data, current
         # Legend marker
         fig.add_trace(
             go.Scatter(
-                x=monthly["year_month"],
+                x=x_actual,
                 y=monthly[col],
                 name=label,
                 legendgroup=col,
@@ -902,16 +917,32 @@ def update_key_metrics_timeseries(data_json, forecast_on, _restyle_data, current
                     )
                     future = frame[frame["is_forecast"]].copy()
                     if not future.empty:
-                        future["year_month"] = (
-                            future["period_end"].dt.to_period("M").astype(str)
-                        )
-
                         band_color = _rgba(color, 0.12)
+
+                        # Plotly will not draw a segment between two separate traces.
+                        # To make the forecast visually "join" the historical series,
+                        # prepend the last actual point to the dashed forecast trace.
+                        last_x = y.index.max()
+                        last_y = float(y.iloc[-1])
+                        x_fc = pd.concat(
+                            [
+                                pd.Series([last_x]),
+                                future["period_end"].reset_index(drop=True),
+                            ],
+                            ignore_index=True,
+                        )
+                        yhat_fc = pd.concat(
+                            [
+                                pd.Series([last_y]),
+                                future["yhat"].reset_index(drop=True),
+                            ],
+                            ignore_index=True,
+                        )
 
                         # CI band (upper then lower with fill)
                         fig.add_trace(
                             go.Scatter(
-                                x=future["year_month"],
+                                x=future["period_end"],
                                 y=future["yhat_upper"],
                                 name=f"{label} (95% CI)",
                                 legendgroup=col,
@@ -924,7 +955,7 @@ def update_key_metrics_timeseries(data_json, forecast_on, _restyle_data, current
                         )
                         fig.add_trace(
                             go.Scatter(
-                                x=future["year_month"],
+                                x=future["period_end"],
                                 y=future["yhat_lower"],
                                 name=f"{label} (95% CI)",
                                 legendgroup=col,
@@ -941,8 +972,8 @@ def update_key_metrics_timeseries(data_json, forecast_on, _restyle_data, current
                         # Forecast dashed line
                         fig.add_trace(
                             go.Scatter(
-                                x=future["year_month"],
-                                y=future["yhat"],
+                                x=x_fc,
+                                y=yhat_fc,
                                 name=f"{label} (Forecast)",
                                 legendgroup=col,
                                 showlegend=False,
@@ -999,6 +1030,9 @@ def update_key_metrics_timeseries(data_json, forecast_on, _restyle_data, current
         tickangle=-30,
         ticks="outside",
         ticklen=6,
+        dtick="M1",
+        tickformat="%Y-%m",
+        hoverformat="%Y-%m",
     )
     fig.update_yaxes(
         tickformat=",",
