@@ -655,8 +655,8 @@ def create_overview_tab(df):
         ticks="outside",
         ticklen=6,
         dtick="M1",
-        tickformat="%Y-%m",
-        hoverformat="%Y-%m",
+        tickformat="%B %Y",
+        hoverformat="%B %Y",
     )
     fig_timeseries.update_yaxes(
         tickformat=",",
@@ -1031,8 +1031,8 @@ def update_key_metrics_timeseries(data_json, forecast_on, _restyle_data, current
         ticks="outside",
         ticklen=6,
         dtick="M1",
-        tickformat="%Y-%m",
-        hoverformat="%Y-%m",
+        tickformat="%B %Y",
+        hoverformat="%B %Y",
     )
     fig.update_yaxes(
         tickformat=",",
