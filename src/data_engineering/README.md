@@ -91,16 +91,11 @@ Examples:
 | `referrals` | Number of new referrals starting in the period. | integer | ≥ 0 | Count where `RefStartThisPeriod = 1`. |
 | `clock_stop_actuals` | Referrals receiving first contact in the period. | integer | ≥ 0 | Count where `FirstContactInPeriod = 1`. |
 | `discharges_no_clock_stop` | Discharges with no first contact recorded. | integer | ≥ 0 | Discharged = 1 AND FirstContact IS NULL. |
-| `referral_clock_stop_ratio` | Ratio of clock stops to referrals. | float | Nullable | `clock_stop_actuals / referrals`. |
-| `referral_discharged_no_clock_stop_ratio` | Ratio of discharges without clock stop to referrals. | float | Nullable | `discharges_no_clock_stop / referrals`. |
-| `demand_ratio` | Ratio of referrals to clock stops. | float | Nullable | `referrals / clock_stop_actuals`. |
 | `total_contacts` | Total contacts where patient was seen in period. | integer | ≥ 0 | PatientSeen = 1. |
 | `ftf_contacts` | Face-to-face contacts in period. | integer | ≥ 0 | FTF attendance flags. |
 | `caseload` | Active referrals on caseload (not waiting or discharged). | integer | ≥ 0 | Discharged = 0 AND WaitAssess = 0. |
 | `total_caseload_contacts` | Contacts after first contact (caseload activity). | integer | ≥ 0 | Contact_Date > FirstContact. |
 | `ftf_caseload_contacts` | Face-to-face caseload contacts. | integer | ≥ 0 | Subset of caseload contacts. |
-| `total_contacts_per_caseload` | Average contacts per caseload. | float | Nullable | `total_caseload_contacts / caseload`. |
-| `ftf_contacts_per_caseload` | Average FTF contacts per caseload. | float | Nullable | `ftf_caseload_contacts / caseload`. |
 | `waiters` | Total referrals waiting for assessment/treatment. | integer | ≥ 0 | RTT included, exclusions removed. |
 | `waiters_under_18_weeks` | Waiting referrals under 18 weeks. | integer | ≥ 0 | Split of `waiters` by waiting-time threshold. |
 | `waiters_over_18_weeks` | Waiting referrals over 18 weeks. | integer | ≥ 0 | Split of `waiters` by waiting-time threshold. |

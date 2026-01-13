@@ -102,12 +102,6 @@ class PatientSummaryStatistics:
                 "avg_ftf_contacts_at_discharge": float(
                     df["average_ftf_contacts_at_discharge"].mean()
                 ),
-                "avg_referral_clock_stop_ratio": float(
-                    df["referral_clock_stop_ratio"].mean()
-                ),
-                "avg_contacts_per_caseload": float(
-                    df["total_contacts_per_caseload"].mean()
-                ),
             },
         }
 
