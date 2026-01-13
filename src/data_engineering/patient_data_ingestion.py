@@ -86,27 +86,6 @@ class PatientDataExtractor:
             WT.[DischargesNoClockStop],
 
             -- ======================================================================== 
-            -- CALCULATED RATIOS
-            -- ========================================================================
-            /*CASE 
-                WHEN WT.[Referrals] > 0 
-                THEN CAST(WT.[ClockStopActuals] AS FLOAT) / WT.[Referrals]
-                ELSE NULL 
-            END AS [ReferralClockStopRatio],
-
-            CASE 
-                WHEN WT.[Referrals] > 0 
-                THEN CAST(WT.[DischargesNoClockStop] AS FLOAT) / WT.[Referrals]
-                ELSE NULL 
-            END AS [ReferralDischargedNoClockStopRatio],
-
-            CASE 
-                WHEN WT.[ClockStopActuals] > 0 
-                THEN CAST(WT.[Referrals] AS FLOAT) / WT.[ClockStopActuals]
-                ELSE NULL 
-            END AS [DemandRatio],*/
-
-            -- ======================================================================== 
             -- CONTACT METRICS
             -- ========================================================================
             CA.[TotalContacts],
@@ -118,18 +97,6 @@ class PatientDataExtractor:
             WT.[Caseload],
             CA.[TotalCaseloadContacts],
             CA.[FTFCaseloadContacts],
-
-            /*CASE 
-                WHEN WT.[Caseload] > 0 
-                THEN CAST(CA.[TotalCaseloadContacts] AS FLOAT) / WT.[Caseload]
-                ELSE NULL 
-            END AS [TotalContactsPerCaseload],
-
-            CASE 
-                WHEN WT.[Caseload] > 0 
-                THEN CAST(CA.[FTFCaseloadContacts] AS FLOAT) / WT.[Caseload]
-                ELSE NULL 
-            END AS [FTFContactsPerCaseload],*/
 
             -- ======================================================================== 
             -- WAITER METRICS
@@ -189,7 +156,12 @@ class PatientDataExtractor:
                 COUNT(CASE WHEN WT.[Discharged] = 0 AND WT.[WaitAssess] = 1 AND WT.[RTTExclusion] = 0 THEN WT.[Ref_ID] END) AS [Waiters],
                 COUNT(CASE WHEN WT.[Discharged] = 0 AND WT.[WaitAssess] = 1 AND WT.[RTTExclusion] = 0 AND WT.[WaitingTime] > 7 * 18 THEN WT.[Ref_ID] END) AS [Waiters18Plus]
 
-            FROM [MIS_AG].[dbo].[Vw_tbl_ag_Report_WaitingTimes] AS WT
+            FROM (
+				SELECT * FROM [MIS_AG].[dbo].[Vw_tbl_ag_Report_WaitingTimes]
+			UNION  
+				SELECT * FROM [MIS_AG].[dbo].[Vw_tbl_ag_Report_WaitingTimes_2324]
+			) AS WT
+            
 			LEFT JOIN [MIS_Config].[dbo].[tbl_org_current_RL9_Service_Line] AS SL ON WT.[ProviderCodeCurrent] = SL.[Service_Codes]
 			WHERE WT.[ProviderCodeCurrent] NOT IN ('996', '998')
 				AND SL.[Status] = 'ACTIVE'
@@ -228,8 +200,17 @@ class PatientDataExtractor:
                 -- All contacts where patient was seen
                 COUNT(CASE WHEN CA.[PatientSeen] = 1 THEN CA.[Ref_ID] END) AS [TotalContacts]
 
-            FROM [MIS_AG].[dbo].[Vw_tbl_ag_Report_ContactAttendances] AS CA
-            LEFT JOIN [MIS_AG].[dbo].[Vw_tbl_ag_Report_WaitingTimes] AS WT
+            FROM (
+				SELECT * FROM [MIS_AG].[dbo].[Vw_tbl_ag_Report_ContactAttendances]
+			UNION  
+				SELECT * FROM [MIS_AG].[dbo].[Vw_tbl_ag_Report_ContactAttendances_2324]
+			) AS CA
+            
+			LEFT JOIN (
+				SELECT * FROM [MIS_AG].[dbo].[Vw_tbl_ag_Report_WaitingTimes]
+			UNION  
+				SELECT * FROM [MIS_AG].[dbo].[Vw_tbl_ag_Report_WaitingTimes_2324]
+			) AS WT
                 ON CA.[Ref_ID] = WT.[Ref_ID] 
                 --AND CA.[ProviderCodeCurrent] = WT.[ProviderCodeCurrent]
                 AND CA.[PeriodEnd] = WT.[PeriodEnd]
