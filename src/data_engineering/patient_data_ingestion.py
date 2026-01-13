@@ -88,7 +88,7 @@ class PatientDataExtractor:
             -- ======================================================================== 
             -- CALCULATED RATIOS
             -- ========================================================================
-            CASE 
+            /*CASE 
                 WHEN WT.[Referrals] > 0 
                 THEN CAST(WT.[ClockStopActuals] AS FLOAT) / WT.[Referrals]
                 ELSE NULL 
@@ -104,7 +104,7 @@ class PatientDataExtractor:
                 WHEN WT.[ClockStopActuals] > 0 
                 THEN CAST(WT.[Referrals] AS FLOAT) / WT.[ClockStopActuals]
                 ELSE NULL 
-            END AS [DemandRatio],
+            END AS [DemandRatio],*/
 
             -- ======================================================================== 
             -- CONTACT METRICS
@@ -119,7 +119,7 @@ class PatientDataExtractor:
             CA.[TotalCaseloadContacts],
             CA.[FTFCaseloadContacts],
 
-            CASE 
+            /*CASE 
                 WHEN WT.[Caseload] > 0 
                 THEN CAST(CA.[TotalCaseloadContacts] AS FLOAT) / WT.[Caseload]
                 ELSE NULL 
@@ -129,7 +129,7 @@ class PatientDataExtractor:
                 WHEN WT.[Caseload] > 0 
                 THEN CAST(CA.[FTFCaseloadContacts] AS FLOAT) / WT.[Caseload]
                 ELSE NULL 
-            END AS [FTFContactsPerCaseload],
+            END AS [FTFContactsPerCaseload],*/
 
             -- ======================================================================== 
             -- WAITER METRICS
@@ -155,58 +155,51 @@ class PatientDataExtractor:
                 SL.[Service_Line],
                 WT.[PeriodEnd],
 
-                -- -------------------------------------------------------------------- 
+                -- --------------------------------------------------------------------
                 -- Discharge Quality Metrics
                 -- --------------------------------------------------------------------
-                AVG(CASE WHEN WT.[Discharged] = 1 
-                    THEN WT.[ContactsPerReferral] END) AS [AverageContactsAtDischarge],
-                AVG(CASE WHEN WT.[Discharged] = 1 
-                    THEN WT.[ContactsFTFPerReferral] END) AS [AverageFTFContactsAtDischarge],
-                AVG(CASE WHEN WT.[Discharged] = 1 
-                    THEN DATEDIFF(DAY, WT.[Ref_Start], WT.[FirstContact]) END) AS [AverageLengthOfTreatment],
+                AVG(CASE WHEN WT.[Discharged] = 1 THEN WT.[ContactsPerReferral] END) AS [AverageContactsAtDischarge],
+                AVG(CASE WHEN WT.[Discharged] = 1 THEN WT.[ContactsFTFPerReferral] END) AS [AverageFTFContactsAtDischarge],
+                AVG(CASE WHEN WT.[Discharged] = 1 THEN DATEDIFF(DAY, WT.[Ref_Start], WT.[FirstContact]) END) AS [AverageLengthOfTreatment],
 
-                -- -------------------------------------------------------------------- 
+                -- --------------------------------------------------------------------
                 -- Current Caseload
                 -- --------------------------------------------------------------------
-                COUNT(CASE WHEN WT.[Discharged] = 0 AND WT.[WaitAssess] = 0 
-                    THEN WT.[Ref_ID] END) AS [Caseload],
+                COUNT(CASE WHEN WT.[Discharged] = 0 AND WT.[WaitAssess] = 0 THEN WT.[Ref_ID] END) AS [Caseload],
 
-                -- -------------------------------------------------------------------- 
+                -- --------------------------------------------------------------------
                 -- Clock Stop Activity
                 -- --------------------------------------------------------------------
-                COUNT(CASE WHEN WT.[FirstContactInPeriod] = 1 
-                    THEN WT.[Ref_ID] END) AS [ClockStopActuals],
+                COUNT(CASE WHEN WT.[FirstContactInPeriod] = 1 THEN WT.[Ref_ID] END) AS [ClockStopActuals],
 
-                -- -------------------------------------------------------------------- 
+                -- --------------------------------------------------------------------
                 -- Discharge Breakdown
                 -- --------------------------------------------------------------------
-                COUNT(CASE WHEN WT.[Discharged] = 1 AND WT.[FirstContact] IS NULL 
-                    THEN WT.[Ref_ID] END) AS [DischargesNoClockStop],
-                COUNT(CASE WHEN WT.[Discharged] = 1 AND WT.[FirstContact] IS NOT NULL 
-                    THEN WT.[Ref_ID] END) AS [DischargesWithClockStop],
+                COUNT(CASE WHEN WT.[Discharged] = 1 AND WT.[FirstContact] IS NULL THEN WT.[Ref_ID] END) AS [DischargesNoClockStop],
+                COUNT(CASE WHEN WT.[Discharged] = 1 AND WT.[FirstContact] IS NOT NULL THEN WT.[Ref_ID] END) AS [DischargesWithClockStop],
 
-                -- -------------------------------------------------------------------- 
+                -- --------------------------------------------------------------------
                 -- New Referrals
                 -- --------------------------------------------------------------------
-                COUNT(CASE WHEN WT.[RefStartThisPeriod] = 1 
-                    THEN WT.[Ref_ID] END) AS [Referrals],
+                COUNT(CASE WHEN WT.[RefStartThisPeriod] = 1 THEN WT.[Ref_ID] END) AS [Referrals],
 
-                -- -------------------------------------------------------------------- 
+                -- --------------------------------------------------------------------
                 -- Waiting List Metrics
                 -- --------------------------------------------------------------------
-                COUNT(CASE WHEN WT.[Discharged] = 0 AND WT.[WaitAssess] = 1 
-                    AND WT.[RTTExclusion] = 0 THEN WT.[Ref_ID] END) AS [Waiters],
-                COUNT(CASE WHEN WT.[Discharged] = 0 AND WT.[WaitAssess] = 1 
-                    AND WT.[RTTExclusion] = 0 AND WT.[WaitingTime] > 7 * 18 
-                    THEN WT.[Ref_ID] END) AS [Waiters18Plus]
+                COUNT(CASE WHEN WT.[Discharged] = 0 AND WT.[WaitAssess] = 1 AND WT.[RTTExclusion] = 0 THEN WT.[Ref_ID] END) AS [Waiters],
+                COUNT(CASE WHEN WT.[Discharged] = 0 AND WT.[WaitAssess] = 1 AND WT.[RTTExclusion] = 0 AND WT.[WaitingTime] > 7 * 18 THEN WT.[Ref_ID] END) AS [Waiters18Plus]
 
             FROM [MIS_AG].[dbo].[Vw_tbl_ag_Report_WaitingTimes] AS WT
-            LEFT JOIN [MIS_Config].[dbo].[tbl_org_current_RL9_Service_Line] AS SL
-                ON WT.[ProviderCodeCurrent] = SL.[Service_Codes]
+			LEFT JOIN [MIS_Config].[dbo].[tbl_org_current_RL9_Service_Line] AS SL ON WT.[ProviderCodeCurrent] = SL.[Service_Codes]
+			WHERE WT.[ProviderCodeCurrent] NOT IN ('996', '998')
+				AND SL.[Status] = 'ACTIVE'
+				--AND SL.[RTT_Report_Enabled] = 1
+
             GROUP BY
                 WT.[ProviderCodeCurrent],
                 SL.[Service_Line],
                 WT.[PeriodEnd]
+                
         ) AS WT
 
         -- ============================================================================
@@ -217,41 +210,39 @@ class PatientDataExtractor:
                 CA.[ProviderCodeCurrent],
                 CA.[PeriodEnd],
 
-                -- -------------------------------------------------------------------- 
+                -- --------------------------------------------------------------------
                 -- Face-to-Face Contact Metrics
                 -- --------------------------------------------------------------------
                 -- FTF contacts after first contact (caseload activity)
-                COUNT(CASE WHEN (CA.[FirstAttendance_FTF] = 1 OR CA.[FollowUp_FTF] = 1) 
-                    AND CA.[Contact_Date] > WT.[FirstContact] THEN CA.[Ref_ID] END) AS [FTFCaseloadContacts],
-                -- All FTF contacts (including first contacts)
-                COUNT(CASE WHEN CA.[FirstAttendance_FTF] = 1 OR CA.[FollowUp_FTF] = 1 
-                    THEN CA.[Ref_ID] END) AS [FTFContacts],
+                COUNT(CASE WHEN (CA.[FirstAttendance_FTF] = 1 OR CA.[FollowUp_FTF] = 1) AND CA.[Contact_Date] > WT.[FirstContact] THEN CA.[Ref_ID] END) AS [FTFCaseloadContacts],
 
-                -- -------------------------------------------------------------------- 
+                -- All FTF contacts (including first contacts)
+                COUNT(CASE WHEN CA.[FirstAttendance_FTF] = 1 OR CA.[FollowUp_FTF] = 1 THEN CA.[Ref_ID] END) AS [FTFContacts],
+
+                -- --------------------------------------------------------------------
                 -- Total Contact Metrics
                 -- --------------------------------------------------------------------
                 -- Total contacts after first contact (caseload activity)
-                COUNT(CASE WHEN CA.[PatientSeen] = 1 AND CA.[Contact_Date] > WT.[FirstContact] 
-                    THEN CA.[Ref_ID] END) AS [TotalCaseloadContacts],
+                COUNT(CASE WHEN CA.[PatientSeen] = 1 AND CA.[Contact_Date] > WT.[FirstContact] THEN CA.[Ref_ID] END) AS [TotalCaseloadContacts],
+
                 -- All contacts where patient was seen
-                COUNT(CASE WHEN CA.[PatientSeen] = 1 
-                    THEN CA.[Ref_ID] END) AS [TotalContacts]
+                COUNT(CASE WHEN CA.[PatientSeen] = 1 THEN CA.[Ref_ID] END) AS [TotalContacts]
 
             FROM [MIS_AG].[dbo].[Vw_tbl_ag_Report_ContactAttendances] AS CA
             LEFT JOIN [MIS_AG].[dbo].[Vw_tbl_ag_Report_WaitingTimes] AS WT
-                ON CA.[Ref_ID] = WT.[Ref_ID]
+                ON CA.[Ref_ID] = WT.[Ref_ID] 
+                --AND CA.[ProviderCodeCurrent] = WT.[ProviderCodeCurrent]
                 AND CA.[PeriodEnd] = WT.[PeriodEnd]
+
             GROUP BY
                 CA.[ProviderCodeCurrent],
                 CA.[PeriodEnd]
-        ) AS CA
-            ON WT.[ProviderCodeCurrent] = CA.[ProviderCodeCurrent]
+                
+        ) AS CA 
+            ON WT.[ProviderCodeCurrent] = CA.[ProviderCodeCurrent] 
             AND WT.[PeriodEnd] = CA.[PeriodEnd]
-
-        ORDER BY
-            WT.[ProviderCodeCurrent],
-            WT.[Service_Line],
-            WT.[PeriodEnd]
+                
+        ORDER BY WT.[ProviderCodeCurrent], WT.[PeriodEnd]
     """
 
     # Expected columns after normalisation
@@ -262,16 +253,11 @@ class PatientDataExtractor:
         "referrals",
         "clock_stop_actuals",
         "discharges_no_clock_stop",
-        "referral_clock_stop_ratio",
-        "referral_discharged_no_clock_stop_ratio",
-        "demand_ratio",
         "total_contacts",
         "ftf_contacts",
         "caseload",
         "total_caseload_contacts",
         "ftf_caseload_contacts",
-        "total_contacts_per_caseload",
-        "ftf_contacts_per_caseload",
         "waiters",
         "waiters_under_18_weeks",
         "waiters_over_18_weeks",
