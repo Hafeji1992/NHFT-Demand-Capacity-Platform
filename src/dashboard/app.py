@@ -5,6 +5,7 @@ Interactive Dash application for visualising demand and capacity data.
 
 import sys
 import logging
+from collections import OrderedDict
 from pathlib import Path
 from typing import Optional
 from io import StringIO
@@ -26,7 +27,44 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from forecasting.forecast import ForecastConfig, make_forecast_frame
-from forecasting.sarima import SarimaSpec
+from forecasting.sarima import SarimaSpec, small_grid_search_aic
+
+
+# ---------------------------------------------------------------------
+# Forecast Caching (keep dashboard interactions responsive)
+# ---------------------------------------------------------------------
+# Dash callbacks can fire frequently (legend toggles, filter changes). We keep a
+# small in-memory cache of selected model specs + forecast frames keyed by the
+# input series signature.
+_FORECAST_CACHE_MAX = 64
+_SPEC_CACHE_MAX = 128
+_forecast_frame_cache: "OrderedDict[tuple, pd.DataFrame]" = OrderedDict()
+_best_spec_cache: "OrderedDict[tuple, SarimaSpec]" = OrderedDict()
+
+
+def _lru_get(cache: OrderedDict, key):
+    if key in cache:
+        cache.move_to_end(key)
+        return cache[key]
+    return None
+
+
+def _lru_set(cache: OrderedDict, key, value, *, maxsize: int):
+    cache[key] = value
+    cache.move_to_end(key)
+    while len(cache) > int(maxsize):
+        cache.popitem(last=False)
+
+
+def _series_signature(y: pd.Series) -> tuple:
+    """Return a stable, hashable signature for a monthly time series."""
+    y = y.sort_index()
+    # Include length + endpoints and a fast content hash for low collision risk.
+    content_hash = int(pd.util.hash_pandas_object(y, index=True).sum())
+    start = int(y.index[0].value) if len(y) else 0
+    end = int(y.index[-1].value) if len(y) else 0
+    return (int(len(y)), start, end, content_hash)
+
 
 # ---------------------------------------------------------------------
 # Logging Configuration
@@ -896,26 +934,60 @@ def update_key_metrics_timeseries(data_json, forecast_on, _restyle_data, current
                     index=monthly_dt_index,
                 ).dropna()
 
-                # With fewer than ~2 seasonal cycles, avoid seasonal differencing (D=0)
-                # so the model can still produce a reasonable forecast.
+                # Auto-select the best model *for this metric + current filtered series*
+                # using a small AIC grid search. Cache both selected specs and forecasts
+                # so legend toggles don't re-fit models.
                 if len(y) >= 12 and y.nunique() >= 2:
-                    spec = (
-                        SarimaSpec(order=(1, 1, 1), seasonal_order=(1, 0, 1, 12))
-                        if len(y) < 24
-                        else SarimaSpec(order=(1, 1, 1), seasonal_order=(1, 1, 1, 12))
-                    )
+                    sig = _series_signature(y)
 
-                    frame = make_forecast_frame(
-                        y,
-                        config=ForecastConfig(
-                            months_ahead=12,
-                            conf_level=0.95,
-                            freq="ME",
-                            auto_select=False,
-                        ),
-                        spec=spec,
-                    )
-                    future = frame[frame["is_forecast"]].copy()
+                    spec_key = (col, sig)
+                    spec = _lru_get(_best_spec_cache, spec_key)
+                    if spec is None:
+                        y_len = int(len(y))
+                        # Keep the grid small for responsiveness.
+                        p = (0, 1) if y_len < 24 else (0, 1, 2)
+                        q = (0, 1) if y_len < 24 else (0, 1, 2)
+                        # With fewer than ~2 seasonal cycles, avoid seasonal differencing.
+                        D = (0,) if y_len < 24 else (0, 1)
+
+                        spec = small_grid_search_aic(
+                            y,
+                            seasonal_period=12,
+                            p=p,
+                            d=(0, 1),
+                            q=q,
+                            P=(0, 1),
+                            D=D,
+                            Q=(0, 1),
+                            trend="n",
+                        )
+                        _lru_set(
+                            _best_spec_cache, spec_key, spec, maxsize=_SPEC_CACHE_MAX
+                        )
+
+                    fc_key = (col, sig, 12, 0.95, "ME")
+                    future = _lru_get(_forecast_frame_cache, fc_key)
+                    if future is None:
+                        frame = make_forecast_frame(
+                            y,
+                            config=ForecastConfig(
+                                months_ahead=12,
+                                conf_level=0.95,
+                                freq="ME",
+                                auto_select=False,
+                            ),
+                            spec=spec,
+                        )
+                        future = frame[frame["is_forecast"]].copy()
+                        _lru_set(
+                            _forecast_frame_cache,
+                            fc_key,
+                            future,
+                            maxsize=_FORECAST_CACHE_MAX,
+                        )
+                    else:
+                        future = future.copy()
+
                     if not future.empty:
                         band_color = _rgba(color, 0.12)
 
