@@ -1172,9 +1172,102 @@ def create_service_line_summary_table(df: pd.DataFrame):
         df.groupby(["provider_code_current", "service_line"])[summary_columns]
         .sum()
         .reset_index()
-        .round(0)
         .sort_values(["provider_code_current", "service_line"])
     )
+
+    # -----------------------------------------------------------------
+    # Derived planning ratios (computed from aggregated totals)
+    # -----------------------------------------------------------------
+    ratio_cols = [
+        "referral_clock_stop_ratio",
+        "referral_discharged_no_clock_stop_ratio",
+        "demand_ratio",
+        "total_contacts_per_caseload",
+        "ftf_contacts_per_caseload",
+    ]
+
+    def _safe_div(numer: pd.Series, denom: pd.Series) -> pd.Series:
+        denom_num = pd.to_numeric(denom, errors="coerce")
+        numer_num = pd.to_numeric(numer, errors="coerce")
+        return numer_num.divide(denom_num.where(denom_num != 0))
+
+    # Ensure base columns exist (if not present in df, keep derived as NA)
+    base_needed = {
+        "referrals",
+        "clock_stop_actuals",
+        "discharges_no_clock_stop",
+        "caseload",
+        "total_caseload_contacts",
+        "ftf_caseload_contacts",
+    }
+    for base in base_needed:
+        if base not in summary_df.columns:
+            summary_df[base] = pd.NA
+
+    summary_df["referral_clock_stop_ratio"] = _safe_div(
+        summary_df["clock_stop_actuals"], summary_df["referrals"]
+    )
+    summary_df["referral_discharged_no_clock_stop_ratio"] = _safe_div(
+        summary_df["discharges_no_clock_stop"], summary_df["referrals"]
+    )
+
+    # As requested: Demand Ratio = Referral Clock Stop Ratio + Referral Discharged No Clock Stop Ratio
+    summary_df["demand_ratio"] = pd.to_numeric(
+        summary_df["referral_clock_stop_ratio"], errors="coerce"
+    ) + pd.to_numeric(
+        summary_df["referral_discharged_no_clock_stop_ratio"], errors="coerce"
+    )
+
+    summary_df["total_contacts_per_caseload"] = _safe_div(
+        summary_df["total_caseload_contacts"], summary_df["caseload"]
+    )
+    summary_df["ftf_contacts_per_caseload"] = _safe_div(
+        summary_df["ftf_caseload_contacts"], summary_df["caseload"]
+    )
+
+    # Preserve existing behaviour for aggregated numeric metrics (rounded to 0),
+    # but keep derived ratios with meaningful decimals.
+    numeric_cols = [
+        c
+        for c in summary_df.columns
+        if c not in {"provider_code_current", "service_line"}
+    ]
+    for c in numeric_cols:
+        summary_df[c] = pd.to_numeric(summary_df[c], errors="coerce")
+
+    for c in [c for c in numeric_cols if c not in ratio_cols]:
+        try:
+            summary_df[c] = summary_df[c].round(0)
+        except Exception:
+            pass
+
+    for c in ratio_cols:
+        try:
+            summary_df[c] = summary_df[c].round(4)
+        except Exception:
+            pass
+
+    # Keep ratio columns near related activity measures if present
+    preferred_order = [
+        "provider_code_current",
+        "service_line",
+        "referrals",
+        "clock_stop_actuals",
+        "discharges_no_clock_stop",
+        "referral_clock_stop_ratio",
+        "referral_discharged_no_clock_stop_ratio",
+        "demand_ratio",
+        "total_contacts",
+        "ftf_contacts",
+        "caseload",
+        "total_caseload_contacts",
+        "ftf_caseload_contacts",
+        "total_contacts_per_caseload",
+        "ftf_contacts_per_caseload",
+    ]
+    existing = [c for c in preferred_order if c in summary_df.columns]
+    remaining = [c for c in summary_df.columns if c not in existing]
+    summary_df = summary_df[existing + remaining]
 
     return dash_table.DataTable(
         id="patient-summary-table",
