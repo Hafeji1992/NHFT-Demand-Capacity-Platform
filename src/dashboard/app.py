@@ -33,8 +33,8 @@ from forecasting.sarima import SarimaSpec, small_grid_search_aic
 # ---------------------------------------------------------------------
 # Forecast Caching (keep dashboard interactions responsive)
 # ---------------------------------------------------------------------
-# Dash callbacks can fire frequently (legend toggles, filter changes). We keep a
-# small in-memory cache of selected model specs + forecast frames keyed by the
+# Dash callbacks can fire frequently (legend toggles, filter changes). Keeping a
+# small in-memory cache of selected model specs and forecast frames keyed by the
 # input series signature.
 _FORECAST_CACHE_MAX = 64
 _SPEC_CACHE_MAX = 128

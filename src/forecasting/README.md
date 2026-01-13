@@ -21,6 +21,8 @@ At a high level, the pipeline is:
 3. **Forecast forward and produce 95% confidence intervals**
    - Outputs are returned in a simple DataFrame format that is easy to plot in Plotly/Dash.
 
+On the dashboard, forecasts are generated **only for metrics currently visible in the chart legend** (so hidden metrics don’t trigger extra compute).
+
 ## Why SARIMA
 
 SARIMA/SARIMAX was chosen for this use case because it matches the constraints of the project:
@@ -54,7 +56,7 @@ Where:
 ### Differencing ($d$ and $D$)
 
 - Differencing helps make the series closer to stationary.
-- Seasonal differencing ($D$) is powerful but **data-hungry**: it effectively reduces usable history and can destabilize estimation with short series.
+- Seasonal differencing ($D$) is powerful but data-hungry: it effectively reduces usable history and can destabilise estimation with short series.
 
 Practical rule used in the dashboard integration:
 
@@ -65,18 +67,24 @@ This is a pragmatic compromise: it preserves the ability to capture repeating an
 
 ### Orders ($p,q,P,Q$) and model selection
 
-Two modes are supported:
+**Lightweight auto-selection (AIC search) - dashboard default**
+  - The Dash app selects the “best” SARIMA specification per metric and per current filter selection (i.e., whichever service/provider filtering is applied).
+  - `small_grid_search_aic(...)` tries a small grid of candidate orders and selects the model with the lowest AIC.
+  - AIC (Akaike Information Criterion) provides a balance between fit quality and model complexity:
+    - lower AIC = better trade-off between goodness-of-fit and overfitting risk.
+  - To keep the UI responsive, the dashboard uses:
+    - a small grid (reduced further when history is short)
+    - in-memory caching of the selected best spec and the resulting forecast so repeated interactions (e.g., legend toggles) don’t re-fit models unnecessarily.
 
-1. **Fixed, fast specification (recommended for dashboards)**
-   - Uses a small, stable SARIMA specification that is quick to fit and tends to behave well for many operational series.
-   - This is chosen for responsiveness and to avoid large per-refresh compute.
-
-2. **Optional lightweight auto-selection (AIC search) for offline tuning**
-   - `small_grid_search_aic(...)` tries a small grid of candidate orders and selects the model with the lowest AIC.
-   - AIC (Akaike Information Criterion) provides a balance between fit quality and model complexity:
-     - lower AIC = better trade-off between goodness-of-fit and overfitting risk.
+2. **Fixed specification (optional / fallback)**
+  - You can still pass an explicit `SarimaSpec(...)` when you want a known, stable model (useful for reproducibility or when tuning offline and “locking” a chosen model).
 
 The search grid is intentionally kept small to reduce runtime and to avoid “over-optimising” on very short histories.
+
+Practical guardrails used (dashboard):
+
+- If there is **12–23 months** of history, seasonal differencing is **disabled** ($D=0$), and the candidate grid for $(p,q)$ is reduced.
+- If there is **≥24 months**, seasonal differencing may be considered ($D \in \{0,1\}$) within the small grid.
 
 ### Frequency handling (monthly)
 
@@ -117,24 +125,26 @@ This is designed to plug directly into Plotly traces (solid actuals, dashed fore
 ```python
 from forecasting.preprocessing import build_monthly_series
 from forecasting.forecast import make_forecast_frame, ForecastConfig
+from forecasting.sarima import SarimaSpec
 
 # df must have: period_end (datetime-like), referrals (numeric)
 y = build_monthly_series(df, "referrals", date_col="period_end")
 
-# 6-month forecast with 95% CI
+# 6-month forecast with 95% CI (auto-select best model via AIC)
 frame_6 = make_forecast_frame(
     y,
-    config=ForecastConfig(months_ahead=6, conf_level=0.95, freq="ME"),
+  config=ForecastConfig(months_ahead=6, conf_level=0.95, freq="ME", auto_select=True),
 )
 
-# 12-month forecast with 95% CI
+# 12-month forecast with 95% CI (explicit fixed spec)
 frame_12 = make_forecast_frame(
     y,
     config=ForecastConfig(months_ahead=12, conf_level=0.95, freq="ME"),
+  spec=SarimaSpec(order=(1, 1, 1), seasonal_order=(1, 1, 1, 12)),
 )
 ```
 
-## Console report (business case walkthrough)
+## Console report
 
 To generate a console-based report that includes:
 
