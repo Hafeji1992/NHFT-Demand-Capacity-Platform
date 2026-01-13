@@ -1,3 +1,10 @@
+"""
+NHFT Forecasting Preprocessing
+==============================
+Utilities for converting raw row-level datasets into regular monthly time
+series suitable for SARIMA/SARIMAX modelling.
+"""
+
 from __future__ import annotations
 
 from typing import Literal, Optional

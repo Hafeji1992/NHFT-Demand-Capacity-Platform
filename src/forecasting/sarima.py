@@ -1,3 +1,10 @@
+"""
+NHFT SARIMA Forecasting
+======================
+Fits SARIMA/SARIMAX models to monthly time series and produces multi-step
+forecasts with confidence intervals.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

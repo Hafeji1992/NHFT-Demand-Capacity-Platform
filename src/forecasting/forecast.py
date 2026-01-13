@@ -1,3 +1,10 @@
+"""
+NHFT Forecast Frame Builder
+==========================
+Combines observed history with SARIMA/SARIMAX forecasts and confidence
+intervals into a single plot-ready DataFrame.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
