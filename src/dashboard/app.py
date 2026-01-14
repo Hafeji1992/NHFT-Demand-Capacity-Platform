@@ -205,6 +205,85 @@ def _rgba(color: str, alpha: float) -> str:
     return f"rgba(0,0,0,{a})"
 
 
+def _fiscal_year_start(dt: "pd.Timestamp") -> "pd.Timestamp":
+    """UK fiscal year start for a given date (Apr 1)."""
+    ts = pd.to_datetime(dt)
+    start_year = int(ts.year) if int(ts.month) >= 4 else int(ts.year) - 1
+    return pd.Timestamp(year=start_year, month=4, day=1)
+
+
+def _default_date_range_last_full_fy_plus_current(
+    min_date: str, max_date: str
+) -> tuple[str, str]:
+    """Return default (start_date, end_date) covering last full FY + current FY.
+
+    Uses the latest available data date as the anchor for “current fiscal year”.
+    Dates are returned as YYYY-MM-DD strings and clamped to [min_date, max_date].
+    """
+    if not min_date or not max_date:
+        return min_date, max_date
+
+    min_dt = pd.to_datetime(min_date, errors="coerce")
+    max_dt = pd.to_datetime(max_date, errors="coerce")
+    if pd.isna(min_dt) or pd.isna(max_dt):
+        return min_date, max_date
+
+    current_fy_start = _fiscal_year_start(max_dt)
+    prior_fy_start = current_fy_start - pd.DateOffset(years=1)
+
+    start_dt = max(min_dt, prior_fy_start)
+    end_dt = max_dt
+    if start_dt > end_dt:
+        start_dt = min_dt
+
+    return start_dt.strftime("%Y-%m-%d"), end_dt.strftime("%Y-%m-%d")
+
+
+def _build_date_slider_domain(
+    df: "pd.DataFrame",
+) -> tuple[list[pd.Timestamp], list[str]]:
+    """Build an ordered list of available dates for the date slider.
+
+    Returns:
+        (date_dts, date_labels) where:
+        - date_dts are pandas Timestamps
+        - date_labels are YYYY-MM-DD strings
+    """
+    if df is None or "period_end" not in df.columns:
+        return [], []
+
+    dates = pd.to_datetime(df["period_end"], errors="coerce").dropna().sort_values()
+    # Keep unique dates only (slider represents discrete reporting periods)
+    date_dts = pd.Index(dates.unique()).sort_values().to_list()
+    date_labels = [pd.Timestamp(d).strftime("%Y-%m-%d") for d in date_dts]
+    return date_dts, date_labels
+
+
+def _clamp_date_slider_value(
+    date_dts: list[pd.Timestamp],
+    start_date: str,
+    end_date: str,
+) -> list[int]:
+    """Convert desired start/end dates into slider indices (clamped)."""
+    if not date_dts:
+        return [0, 0]
+
+    start_dt = pd.to_datetime(start_date, errors="coerce")
+    end_dt = pd.to_datetime(end_date, errors="coerce")
+    if pd.isna(start_dt) or pd.isna(end_dt):
+        return [0, len(date_dts) - 1]
+
+    idx = pd.Index(date_dts)
+    start_i = int(idx.searchsorted(start_dt, side="left"))
+    end_i = int(idx.searchsorted(end_dt, side="right") - 1)
+
+    start_i = max(0, min(start_i, len(date_dts) - 1))
+    end_i = max(0, min(end_i, len(date_dts) - 1))
+    if start_i > end_i:
+        start_i, end_i = end_i, start_i
+    return [start_i, end_i]
+
+
 def create_filter_section():
     """Create the top-of-page filter controls.
 
@@ -238,6 +317,33 @@ def create_filter_section():
         service_line_options = []
 
     min_date, max_date = data_handler.get_date_range()
+    default_start_date, default_end_date = (
+        _default_date_range_last_full_fy_plus_current(min_date, max_date)
+    )
+
+    # Build a discrete date domain for a slider (one step per reporting period)
+    date_dts, date_labels = _build_date_slider_domain(data_handler.patient_df)
+    if date_dts:
+        slider_value = _clamp_date_slider_value(
+            date_dts, default_start_date, default_end_date
+        )
+        slider_min = 0
+        slider_max = len(date_dts) - 1
+
+        # Sparse marks (start/end + yearly-ish) to avoid overcrowding
+        marks: dict[int, str] = {}
+        marks[0] = pd.Timestamp(date_dts[0]).strftime("%b %Y")
+        marks[slider_max] = pd.Timestamp(date_dts[-1]).strftime("%b %Y")
+        for i, d in enumerate(date_dts):
+            # Label April periods (common FY anchor) and January as a mid-year anchor
+            if pd.Timestamp(d).month in {1, 4}:
+                marks.setdefault(i, pd.Timestamp(d).strftime("%b %Y"))
+    else:
+        # Fallback when no dates available
+        slider_value = [0, 0]
+        slider_min = 0
+        slider_max = 0
+        marks = {0: "N/A"}
 
     return dbc.Row(
         [
@@ -250,11 +356,27 @@ def create_filter_section():
                                 width="auto",
                             ),
                             dbc.Col(
-                                dcc.DatePickerRange(
-                                    id="date-range-picker",
-                                    start_date=min_date,
-                                    end_date=max_date,
-                                    display_format="YYYY-MM-DD",
+                                html.Div(
+                                    [
+                                        dcc.RangeSlider(
+                                            id="date-range-slider",
+                                            min=slider_min,
+                                            max=slider_max,
+                                            step=1,
+                                            value=slider_value,
+                                            marks=marks,
+                                            updatemode="mouseup",
+                                            tooltip={
+                                                "placement": "bottom",
+                                                "always_visible": False,
+                                            },
+                                        ),
+                                        html.Div(
+                                            id="date-range-display",
+                                            className="text-muted",
+                                            style={"fontSize": "0.9rem"},
+                                        ),
+                                    ]
                                 ),
                                 width=True,
                             ),
@@ -370,18 +492,16 @@ app.layout = dbc.Container(
     Output("filtered-data-store", "data"),
     [Input("apply-filters-btn", "n_clicks")],
     [
-        State("date-range-picker", "start_date"),
-        State("date-range-picker", "end_date"),
+        State("date-range-slider", "value"),
         State("service-line-dropdown", "value"),
     ],
 )
-def filter_data(n_clicks, start_date, end_date, service_lines):
+def filter_data(n_clicks, date_range, service_lines):
     """Filter patient data based on the UI controls.
 
     Args:
         n_clicks: Number of clicks on the "Apply Filters" button.
-        start_date: Start date (YYYY-MM-DD) from the date picker.
-        end_date: End date (YYYY-MM-DD) from the date picker.
+        date_range: [start_index, end_index] from the date range slider.
         service_lines: List of selected dropdown values in the form
             "provider_code_current|service_line".
 
@@ -394,6 +514,27 @@ def filter_data(n_clicks, start_date, end_date, service_lines):
 
     df = data_handler.patient_df.copy()
 
+    # Map slider indices to actual dates
+    start_date = None
+    end_date = None
+    try:
+        date_dts, date_labels = _build_date_slider_domain(df)
+        if (
+            date_labels
+            and isinstance(date_range, (list, tuple))
+            and len(date_range) == 2
+        ):
+            lo = int(round(float(date_range[0])))
+            hi = int(round(float(date_range[1])))
+            lo = max(0, min(lo, len(date_labels) - 1))
+            hi = max(0, min(hi, len(date_labels) - 1))
+            if lo > hi:
+                lo, hi = hi, lo
+            start_date = date_labels[lo]
+            end_date = date_labels[hi]
+    except Exception as e:
+        logger.warning(f"⚠️ Failed to map date slider range: {e}")
+
     # Apply filters
     if start_date and end_date:
         df = data_handler.filter_by_date_range(df, start_date, end_date)
@@ -405,6 +546,34 @@ def filter_data(n_clicks, start_date, end_date, service_lines):
 
     # Store as JSON
     return df.to_json(date_format="iso", orient="split")
+
+
+@app.callback(
+    Output("date-range-display", "children"),
+    [Input("date-range-slider", "value")],
+)
+def update_date_range_display(date_range):
+    """Show the selected date range as text under the slider."""
+    if data_handler is None or data_handler.patient_df is None:
+        return ""
+
+    try:
+        date_dts, date_labels = _build_date_slider_domain(data_handler.patient_df)
+        if not date_labels:
+            return ""
+        if not isinstance(date_range, (list, tuple)) or len(date_range) != 2:
+            return ""
+
+        lo = int(round(float(date_range[0])))
+        hi = int(round(float(date_range[1])))
+        lo = max(0, min(lo, len(date_labels) - 1))
+        hi = max(0, min(hi, len(date_labels) - 1))
+        if lo > hi:
+            lo, hi = hi, lo
+
+        return f"{date_labels[lo]} to {date_labels[hi]}"
+    except Exception:
+        return ""
 
 
 @app.callback(
