@@ -1,6 +1,6 @@
 """
-NHFT SARIMA Console Report
-=========================
+NHFT SARIMA Console Report (Archived)
+====================================
 Generates a console-based forecasting report for a chosen metric:
 
 - Loads a CSV dataset (default: data/patient_data.csv)
@@ -9,6 +9,8 @@ Generates a console-based forecasting report for a chosen metric:
 - Performs lightweight SARIMA model selection using AIC over a small grid
 - Fits the selected SARIMA/SARIMAX model and prints a model summary
 - Produces a multi-step forecast with confidence intervals
+
+This script is kept for reference; the dashboard defaults to ETS.
 
 """
 
@@ -28,10 +30,10 @@ from statsmodels.tsa.stattools import adfuller
 from statsmodels.tools.sm_exceptions import ConvergenceWarning
 
 # Ensure src is on the path so `forecasting.*` imports work when running directly.
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from forecasting.preprocessing import build_monthly_series
-from forecasting.sarima import SarimaForecaster, SarimaSpec
+from forecasting.archived_sarima.sarima import SarimaForecaster, SarimaSpec
 
 
 # ---------------------------------------------------------------------
@@ -274,7 +276,7 @@ def _print_fit_and_forecast_section(
 
 
 def _default_csv_path() -> Path:
-    project_root = Path(__file__).resolve().parents[2]
+    project_root = Path(__file__).resolve().parents[3]
     return project_root / "data" / "patient_data.csv"
 
 
@@ -402,7 +404,7 @@ def main() -> int:
             f"No arguments provided; using defaults: --csv {csv_path} --metric {args.metric}"
         )
 
-    _print_title("NHFT SARIMA Forecasting Console Report")
+    _print_title("NHFT SARIMA Forecasting Console Report (Archived)")
     print(f"Data source: {csv_path}")
     print(f"Metric:      {args.metric}")
     print(f"Date col:    {args.date_col}")
@@ -508,10 +510,13 @@ def main() -> int:
         for name in _suggest_metric_columns(df, date_col=args.date_col):
             print(f"- {name}")
         print("\nExample:")
+        candidate = _suggest_metric_columns(df, date_col=args.date_col)[0]
         print(
-            f"python src/forecasting/sarima_console_report.py --metric { _suggest_metric_columns(df, date_col=args.date_col)[0] }"
+            "python src/forecasting/archived_sarima/sarima_report.py "
+            f"--metric {candidate}"
         )
         return 2
+
     y = build_monthly_series(
         df,
         args.metric,

@@ -1,4 +1,4 @@
-# Forecasting (ETS / Exponential Smoothing)
+# Forecasting with ETS (Error Trend and Seasonality, or Holt-Winters Exponential Smoothing)
 
 This folder contains the time-series forecasting utilities for the NHFT Demand–Capacity Platform.
 
@@ -6,7 +6,7 @@ The goal is to generate short-to-medium horizon planning forecasts (typically **
 
 ## Why ETS is used (dashboard default)
 
-The dashboard now uses **ETS / Holt-Winters Exponential Smoothing** as the primary forecasting method.
+Intially, Seasonal ARIMA (Auto Regressive Integrated Moving Average) was implemented, though now the dashboard uses **ETS** as the forecasting method.
 
 This change was made because the project’s interactive dashboard needs forecasting that is:
 
@@ -29,7 +29,7 @@ At a high level, the pipeline is:
    - Converts row-level data into a regularly spaced monthly series.
    - Fills missing months (if any) so the model sees a consistent calendar.
 
-2. **Fit an ETS model (Holt-Winters Exponential Smoothing)**
+2. **Fit an ETS model**
    - Models the series using level/trend/seasonal components.
    - Can optionally use a **damped trend**, which often improves medium-horizon stability.
 
@@ -51,6 +51,26 @@ To keep the UI responsive:
 
 - The search space is intentionally small.
 - Selection is cached **per metric and per filter state** (so it only runs once for the same filtered series).
+
+### Dashboard caching (spec per metric per filter state)
+
+The dashboard keeps two small **in-memory LRU caches** so forecasts feel responsive:
+
+- **Best-spec cache**: the selected `EtsSpec` is cached using a key derived from:
+  - the metric name (e.g., `referrals`)
+  - a *series signature* for the filtered monthly series (length + endpoints + a fast content hash)
+
+- **Forecast-frame cache**: the computed forecast frame (future rows only) is cached using a key derived from:
+  - the metric name
+  - the same series signature
+  - the selected `EtsSpec`
+  - forecast settings (horizon, confidence level, frequency)
+
+This means:
+
+- The first time you toggle forecast for a metric under a given filter selection, the model is fit and cached.
+- Subsequent toggles with the same filters reuse the cached spec + forecast.
+- Cache lives in-process (it resets when the dashboard restarts).
 
 ## Frequency handling (monthly)
 
@@ -79,7 +99,10 @@ This plugs directly into Plotly traces (solid actuals, dashed forecast, and a sh
 - `forecast.py`
   - `ForecastConfig` (forecast horizon, confidence level, frequency)
   - `make_ets_forecast_frame(y, config=..., spec=...)` (history + future)
-  - `make_forecast_frame(...)` (SARIMA frame builder; retained for offline use)
+- `ets_report.py`
+  - Console report script for ETS selection + fit + forecast preview
+- `archived_sarima/`
+  - `sarima.py`, `sarima_report.py` (kept for reference; not used by dashboard)
 
 ## Quick example (ETS)
 
@@ -105,11 +128,11 @@ frame_12 = make_ets_forecast_frame(
 )
 ```
 
-## SARIMA (retained for offline analysis)
+## SARIMA (archived)
 
-SARIMA/SARIMAX utilities are still present in this folder for offline exploration and reporting.
-They are not used by default in the dashboard because seasonal SARIMA fitting was slower and was
-emitting optimiser non-convergence warnings on short monthly series.
+The earlier SARIMA/SARIMAX implementation has been moved into `archived_sarima/` for reference.
+It is not used by default in the dashboard because seasonal SARIMA fitting was slower and more
+likely to emit optimiser non-convergence warnings on short monthly series.
 
 ## Important caveats
 

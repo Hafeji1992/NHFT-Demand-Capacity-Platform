@@ -1,8 +1,10 @@
-"""
-NHFT Forecast Frame Builder
-==========================
-Combines observed history with SARIMA/SARIMAX forecasts and confidence
-intervals into a single plot-ready DataFrame.
+"""NHFT Forecast Frame Builder.
+
+Combines observed history with model forecasts and confidence intervals into a
+single plot-ready DataFrame.
+
+The dashboard defaults to ETS (Holt-Winters Exponential Smoothing). SARIMA
+helpers are kept for offline/reference use under `archived_sarima/`.
 """
 
 from __future__ import annotations
@@ -13,13 +15,13 @@ from typing import Optional
 import pandas as pd
 
 from .preprocessing import coerce_monthly_series
-from .sarima import SarimaForecaster, SarimaSpec, small_grid_search_aic
+from .archived_sarima.sarima import SarimaForecaster, SarimaSpec, small_grid_search_aic
 from .ets import EtsForecaster, EtsSpec, small_grid_search_aic_ets
 
 
 @dataclass(frozen=True)
 class ForecastConfig:
-    """Configuration for generating a monthly SARIMA forecast."""
+    """Configuration for generating a monthly forecast."""
 
     months_ahead: int = 6
     conf_level: float = 0.95
