@@ -14,6 +14,7 @@ import pandas as pd
 
 from .preprocessing import coerce_monthly_series
 from .sarima import SarimaForecaster, SarimaSpec, small_grid_search_aic
+from .ets import EtsForecaster, EtsSpec, small_grid_search_aic_ets
 
 
 @dataclass(frozen=True)
@@ -91,6 +92,66 @@ def make_forecast_frame(
     out = pd.concat([history, future], ignore_index=True)
 
     # Ensure types are Plotly-friendly
+    out["period_end"] = pd.to_datetime(out["period_end"])
+    for col in ["y", "yhat", "yhat_lower", "yhat_upper"]:
+        out[col] = pd.to_numeric(out[col], errors="coerce")
+
+    return out
+
+
+def make_ets_forecast_frame(
+    y: pd.Series,
+    *,
+    config: ForecastConfig = ForecastConfig(),
+    spec: Optional[EtsSpec] = None,
+) -> pd.DataFrame:
+    """Build a single DataFrame containing history + ETS forecast + confidence intervals.
+
+    Uses Holt-Winters Exponential Smoothing (ETS). The confidence intervals are
+    approximate and based on residual variance, widened with sqrt(h).
+    """
+
+    y2 = coerce_monthly_series(y, freq=config.freq, fill_missing="zero")
+
+    if spec is None:
+        if config.auto_select:
+            # Keep this small: dashboard-first selection.
+            spec = small_grid_search_aic_ets(y2, seasonal_period=config.seasonal_period)
+        else:
+            spec = EtsSpec(
+                trend="add",
+                seasonal="add",
+                seasonal_periods=int(config.seasonal_period),
+                damped_trend=True,
+            )
+
+    model = EtsForecaster(spec=spec).fit(y2)
+    fc = model.forecast(config.months_ahead, conf_level=config.conf_level)
+
+    history = pd.DataFrame(
+        {
+            "period_end": y2.index,
+            "y": y2.values,
+            "yhat": pd.NA,
+            "yhat_lower": pd.NA,
+            "yhat_upper": pd.NA,
+            "is_forecast": False,
+        }
+    )
+
+    future = pd.DataFrame(
+        {
+            "period_end": fc.index,
+            "y": pd.NA,
+            "yhat": fc["yhat"].values,
+            "yhat_lower": fc["yhat_lower"].values,
+            "yhat_upper": fc["yhat_upper"].values,
+            "is_forecast": True,
+        }
+    )
+
+    out = pd.concat([history, future], ignore_index=True)
+
     out["period_end"] = pd.to_datetime(out["period_end"])
     for col in ["y", "yhat", "yhat_lower", "yhat_upper"]:
         out[col] = pd.to_numeric(out[col], errors="coerce")

@@ -26,8 +26,8 @@ SRC_ROOT = Path(__file__).resolve().parents[1]
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from forecasting.forecast import ForecastConfig, make_forecast_frame
-from forecasting.sarima import SarimaSpec, small_grid_search_aic
+from forecasting.forecast import ForecastConfig, make_ets_forecast_frame
+from forecasting.ets import EtsSpec, small_grid_search_aic_ets
 
 
 # ---------------------------------------------------------------------
@@ -39,7 +39,7 @@ from forecasting.sarima import SarimaSpec, small_grid_search_aic
 _FORECAST_CACHE_MAX = 64
 _SPEC_CACHE_MAX = 128
 _forecast_frame_cache: "OrderedDict[tuple, pd.DataFrame]" = OrderedDict()
-_best_spec_cache: "OrderedDict[tuple, SarimaSpec]" = OrderedDict()
+_best_spec_cache: "OrderedDict[tuple, EtsSpec]" = OrderedDict()
 
 
 def _lru_get(cache: OrderedDict, key):
@@ -294,6 +294,275 @@ def create_filter_section():
     )
 
 
+def _monthly_series_from_filtered_df(df: pd.DataFrame, metric: str) -> pd.Series:
+    """Build a month-end indexed series for a single metric from the filtered dataset."""
+    if df is None or df.empty:
+        return pd.Series(dtype=float)
+
+    df_sorted = df.sort_values("period_end")
+    if "year_month" not in df_sorted.columns:
+        # Fallback if upstream preprocessing ever changes
+        df_sorted["year_month"] = (
+            pd.to_datetime(df_sorted["period_end"]).dt.to_period("M").astype(str)
+        )
+
+    monthly = (
+        df_sorted.groupby("year_month")
+        .agg({metric: "sum"})
+        .reset_index()
+        .sort_values("year_month")
+    )
+
+    # Month-end DatetimeIndex for forecasting + plotting
+    x = pd.PeriodIndex(monthly["year_month"].astype(str), freq="M").to_timestamp("M")
+    y = pd.Series(
+        pd.to_numeric(monthly[metric], errors="coerce").astype(float).values,
+        index=pd.DatetimeIndex(x),
+        name=metric,
+    ).dropna()
+    return y
+
+
+def _metric_timeseries_figure(
+    *,
+    df: pd.DataFrame,
+    metric: str,
+    label: str,
+    color: str,
+    forecast_on: bool,
+) -> go.Figure:
+    """Create a single-metric time series figure with optional ETS forecast."""
+    y = _monthly_series_from_filtered_df(df, metric)
+    fig = go.Figure()
+
+    if y.empty:
+        fig.update_layout(
+            title=dict(text=label, x=0.5, xanchor="center"),
+            template="plotly_white",
+            height=420,
+        )
+        fig.add_annotation(
+            xref="paper",
+            yref="paper",
+            x=0.5,
+            y=0.5,
+            text="No data available for selected filters",
+            showarrow=False,
+            font=dict(size=14, color="rgba(0,0,0,0.65)"),
+        )
+        return fig
+
+    # Actuals (line + markers)
+    fig.add_trace(
+        go.Scatter(
+            x=y.index,
+            y=y.values,
+            name=label,
+            mode="lines",
+            line=dict(width=3, shape="spline", color=color),
+            hovertemplate=f"{label}: <b>%{{y:,}}</b><extra></extra>",
+            showlegend=False,
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=y.index,
+            y=y.values,
+            name=label,
+            mode="markers",
+            marker=dict(size=8, color=color),
+            hoverinfo="skip",
+            showlegend=False,
+        )
+    )
+
+    # Optional forecast (only for this metric)
+    if bool(forecast_on):
+        try:
+            if len(y) >= 12 and y.nunique() >= 2:
+                # Use the filtered series signature as a cache key so model
+                # selection runs only once per metric per filter state.
+                #
+                # Your dataset currently spans ~30 months, so we keep the search
+                # space intentionally small to stay responsive.
+                y_fit = y
+                if len(y_fit) > 36:
+                    y_fit = y_fit.iloc[-36:]
+
+                sig = _series_signature(y_fit)
+
+                # AIC-based spec selection (cached)
+                spec_key = ("ets_aic_v1", metric, sig)
+                spec = _lru_get(_best_spec_cache, spec_key)
+                if spec is None:
+                    y_len = int(len(y_fit))
+                    # Guardrails for short monthly series (~30 months): ETS with
+                    # additive seasonality is usually OK, but keep it optional.
+                    seasonal_opts = ("add", None) if y_len >= 24 else (None,)
+
+                    spec = small_grid_search_aic_ets(
+                        y_fit,
+                        seasonal_period=12,
+                        trend=("add", None),
+                        seasonal=seasonal_opts,
+                        damped_trend=(True, False),
+                    )
+                    _lru_set(_best_spec_cache, spec_key, spec, maxsize=_SPEC_CACHE_MAX)
+
+                # Include the selected spec in the forecast cache key to avoid
+                # collisions if the selection settings change.
+                fc_key = (
+                    metric,
+                    sig,
+                    spec.trend,
+                    spec.seasonal,
+                    spec.seasonal_periods,
+                    spec.damped_trend,
+                    12,
+                    0.95,
+                    "ME",
+                )
+                future = _lru_get(_forecast_frame_cache, fc_key)
+                if future is None:
+                    frame = make_ets_forecast_frame(
+                        y_fit,
+                        config=ForecastConfig(
+                            months_ahead=12,
+                            conf_level=0.95,
+                            freq="ME",
+                            auto_select=False,
+                        ),
+                        spec=spec,
+                    )
+                    future = frame[frame["is_forecast"]].copy()
+                    _lru_set(
+                        _forecast_frame_cache,
+                        fc_key,
+                        future,
+                        maxsize=_FORECAST_CACHE_MAX,
+                    )
+                else:
+                    future = future.copy()
+
+                if not future.empty:
+                    band_color = _rgba(color, 0.12)
+
+                    # CI band
+                    fig.add_trace(
+                        go.Scatter(
+                            x=future["period_end"],
+                            y=future["yhat_upper"],
+                            mode="lines",
+                            line=dict(width=0),
+                            hoverinfo="skip",
+                            showlegend=False,
+                            name=f"{label} (95% CI)",
+                        )
+                    )
+                    fig.add_trace(
+                        go.Scatter(
+                            x=future["period_end"],
+                            y=future["yhat_lower"],
+                            mode="lines",
+                            line=dict(width=0),
+                            fill="tonexty",
+                            fillcolor=band_color,
+                            hoverinfo="skip",
+                            showlegend=False,
+                            name=f"{label} (95% CI)",
+                        )
+                    )
+
+                    # Forecast dashed line joined to last actual point
+                    last_x = y.index.max()
+                    last_y = float(y.iloc[-1])
+                    x_fc = pd.concat(
+                        [
+                            pd.Series([last_x]),
+                            future["period_end"].reset_index(drop=True),
+                        ],
+                        ignore_index=True,
+                    )
+                    yhat_fc = pd.concat(
+                        [
+                            pd.Series([last_y]),
+                            future["yhat"].reset_index(drop=True),
+                        ],
+                        ignore_index=True,
+                    )
+
+                    fig.add_trace(
+                        go.Scatter(
+                            x=x_fc,
+                            y=yhat_fc,
+                            mode="lines",
+                            line=dict(width=2, dash="dash", color=color),
+                            hovertemplate=f"{label} (Forecast): <b>%{{y:,.0f}}</b><extra></extra>",
+                            showlegend=False,
+                            name=f"{label} (Forecast)",
+                        )
+                    )
+            else:
+                fig.add_annotation(
+                    xref="paper",
+                    yref="paper",
+                    x=0.01,
+                    y=0.99,
+                    xanchor="left",
+                    yanchor="top",
+                    text="Forecast needs ≥12 months of history",
+                    showarrow=False,
+                    font=dict(size=12, color="rgba(0,0,0,0.65)"),
+                    bgcolor="rgba(255,255,255,0.85)",
+                    bordercolor="rgba(0,0,0,0.1)",
+                    borderwidth=1,
+                )
+        except Exception as e:
+            logger.warning(f"⚠️ Forecast skipped for '{metric}': {e}")
+            fig.add_annotation(
+                xref="paper",
+                yref="paper",
+                x=0.01,
+                y=0.99,
+                xanchor="left",
+                yanchor="top",
+                text=f"Forecast error: {type(e).__name__}",
+                showarrow=False,
+                font=dict(size=12, color="rgba(0,0,0,0.65)"),
+                bgcolor="rgba(255,255,255,0.85)",
+                bordercolor="rgba(0,0,0,0.1)",
+                borderwidth=1,
+            )
+
+    fig.update_layout(
+        title=dict(text=label, x=0.5, xanchor="center", font=dict(size=20)),
+        xaxis_title="Period",
+        yaxis_title="Count",
+        hovermode="x unified",
+        height=420,
+        template="plotly_white",
+        margin=dict(l=40, r=30, t=70, b=50),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+    )
+    fig.update_xaxes(
+        showgrid=False,
+        tickangle=-30,
+        ticks="outside",
+        ticklen=6,
+        dtick="M1",
+        tickformat="%B %Y",
+        hoverformat="%B %Y",
+    )
+    fig.update_yaxes(
+        tickformat=",",
+        showgrid=True,
+        gridcolor="rgba(0,0,0,0.08)",
+        zeroline=False,
+    )
+    return fig
+
+
 # ---------------------------------------------------------------------
 # Layout
 # ---------------------------------------------------------------------
@@ -334,24 +603,6 @@ app.layout = dbc.Container(
                                 ),
                             ],
                             className="mb-3",
-                        ),
-                        dbc.Row(
-                            [
-                                dbc.Col(
-                                    dbc.Switch(
-                                        id="forecast-toggle",
-                                        label="Forecast (SARIMA, 95% CI)",
-                                        value=False,
-                                    ),
-                                    width="auto",
-                                    style={
-                                        # Align this control with the chart legend region
-                                        "marginLeft": "auto",
-                                        "marginRight": "200px",
-                                    },
-                                )
-                            ],
-                            className="mb-2",
                         ),
                         # Tab Content
                         html.Div(id="tab-content"),
@@ -556,14 +807,6 @@ def update_tab_content(active_tab, data_json):
     return html.Div("Invalid tab selection")
 
 
-@app.callback(
-    Output("forecast-toggle", "disabled"),
-    [Input("main-tabs", "value")],
-)
-def disable_forecast_toggle_when_not_overview(active_tab: str) -> bool:
-    return active_tab != "overview-tab"
-
-
 def create_overview_tab(df):
     """Create the Overview tab layout.
 
@@ -574,134 +817,7 @@ def create_overview_tab(df):
         A Dash layout component containing the overview charts.
     """
 
-    # -----------------------------
-    # Key Metrics (Time series chart)
-    # -----------------------------
     df_sorted = df.sort_values("period_end")
-
-    monthly = (
-        df_sorted.groupby("year_month")
-        .agg(
-            {
-                "referrals": "sum",
-                "waiters": "sum",
-                "caseload": "sum",
-                "discharges_from_caseload": "sum",
-                "total_contacts": "sum",
-                "clock_stop_actuals": "sum",
-            }
-        )
-        .reset_index()
-    )
-
-    # Use a real datetime x-axis at month-end so forecast + actuals join smoothly.
-    # Keep month bucket labels in hover/ticks via formatting.
-    try:
-        monthly_x = pd.PeriodIndex(
-            monthly["year_month"].astype(str), freq="M"
-        ).to_timestamp("M")
-    except Exception:
-        monthly_x = monthly["year_month"].astype(str)
-
-    fig_timeseries = go.Figure()
-
-    # Use Plotly's default qualitative palette for consistent, accessible colours
-    palette = px.colors.qualitative.Plotly
-    series = [
-        ("Referrals", "referrals"),
-        ("Waiters", "waiters"),
-        ("Caseload", "caseload"),
-        ("Contacts", "total_contacts"),
-        ("Discharges", "discharges_from_caseload"),
-        ("Clock Stop Actuals", "clock_stop_actuals"),
-    ]
-
-    for i, (label, col) in enumerate(series):
-        if col not in monthly.columns:
-            continue
-
-        # Only show Referrals + Clock Stop Actuals by default; keep others selectable.
-        default_visible = col in {"referrals", "clock_stop_actuals"}
-        color = palette[i % len(palette)]
-
-        # Line trace
-        fig_timeseries.add_trace(
-            go.Scatter(
-                x=monthly_x,
-                y=monthly[col],
-                name=label,
-                legendgroup=col,
-                showlegend=False,
-                mode="lines",
-                visible=True if default_visible else "legendonly",
-                line=dict(width=3, shape="spline", color=color),
-                # With hovermode='x unified', keep the date in the unified header (shown once)
-                hovertemplate="%{fullData.name}: <b>%{y:,}</b><extra></extra>",
-            )
-        )
-
-        # Marker trace (legend entry shown as circle only)
-        fig_timeseries.add_trace(
-            go.Scatter(
-                x=monthly_x,
-                y=monthly[col],
-                name=label,
-                legendgroup=col,
-                showlegend=True,
-                mode="markers",
-                visible=True if default_visible else "legendonly",
-                marker=dict(size=9, color=color),
-                hoverinfo="skip",
-            )
-        )
-
-    fig_timeseries.update_layout(
-        title=dict(
-            text="Key Metrics Over Time",
-            x=0.5,
-            xanchor="center",
-            font=dict(size=22),
-        ),
-        xaxis_title="Period",
-        yaxis_title="Number of Patients",
-        hovermode="x unified",
-        height=500,
-        template="plotly_white",
-        legend=dict(
-            title=dict(text="Key metrics (click to hide/show)"),
-            orientation="v",
-            yanchor="top",
-            y=1,
-            xanchor="left",
-            x=1.02,
-            bgcolor="rgba(255,255,255,0.85)",
-            bordercolor="rgba(0,0,0,0.08)",
-            borderwidth=1,
-            itemsizing="constant",
-        ),
-        legend_itemclick="toggle",
-        legend_itemdoubleclick="toggleothers",
-        legend_groupclick="togglegroup",
-        margin=dict(l=40, r=200, t=80, b=50),
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-    )
-
-    fig_timeseries.update_xaxes(
-        showgrid=False,
-        tickangle=-30,
-        ticks="outside",
-        ticklen=6,
-        dtick="M1",
-        tickformat="%B %Y",
-        hoverformat="%B %Y",
-    )
-    fig_timeseries.update_yaxes(
-        tickformat=",",
-        showgrid=True,
-        gridcolor="rgba(0,0,0,0.08)",
-        zeroline=False,
-    )
 
     # -----------------------------
     # 18-week waiters split (stacked bar)
@@ -793,15 +909,10 @@ def create_overview_tab(df):
     # -----------------------------
     return html.Div(
         [
-            # Main time series chart
-            dbc.Row(
-                [
-                    dbc.Col(
-                        dcc.Graph(id="key-metrics-timeseries", figure=fig_timeseries),
-                        width=12,
-                    ),
-                ],
-                className="mb-4",
+            dbc.Alert(
+                "Key metric time series have moved to the Demand Analysis tab.",
+                color="secondary",
+                className="mt-3",
             ),
             # Stacked 18-week bar chart
             waiters_chart,
@@ -810,336 +921,106 @@ def create_overview_tab(df):
 
 
 @app.callback(
-    Output("key-metrics-timeseries", "figure"),
-    [
-        Input("filtered-data-store", "data"),
-        Input("forecast-toggle", "value"),
-        Input("key-metrics-timeseries", "restyleData"),
-    ],
-    [State("key-metrics-timeseries", "figure")],
+    Output("referrals-timeseries", "figure"),
+    [Input("filtered-data-store", "data"), Input("referrals-forecast-toggle", "value")],
 )
-def update_key_metrics_timeseries(data_json, forecast_on, _restyle_data, current_fig):
-    """Update the key metrics time series chart.
-
-    - Keeps current legend selections (via `current_fig`).
-    - When forecast is enabled, computes SARIMA forecasts ONLY for metrics that
-      are currently visible (not 'legendonly').
-    """
-
+def update_referrals_timeseries(data_json, forecast_on):
     if data_json is None:
         return go.Figure()
-
     df = pd.read_json(StringIO(data_json), orient="split")
     if df.empty:
         return go.Figure()
-
     df["period_end"] = pd.to_datetime(df["period_end"])
-    df_sorted = df.sort_values("period_end")
-
-    monthly = (
-        df_sorted.groupby("year_month")
-        .agg(
-            {
-                "referrals": "sum",
-                "waiters": "sum",
-                "caseload": "sum",
-                "discharges_from_caseload": "sum",
-                "total_contacts": "sum",
-                "clock_stop_actuals": "sum",
-            }
-        )
-        .reset_index()
+    return _metric_timeseries_figure(
+        df=df,
+        metric="referrals",
+        label="Referrals",
+        color="#636EFA",
+        forecast_on=bool(forecast_on),
     )
 
-    # Use real datetime points (month-end) for both actuals and forecasts.
-    try:
-        x_actual = pd.PeriodIndex(
-            monthly["year_month"].astype(str), freq="M"
-        ).to_timestamp("M")
-    except Exception:
-        x_actual = monthly["year_month"].astype(str)
 
-    # Extract current legend visibility state (so toggling forecast doesn't reset selections)
-    group_visibility = {}
-    if isinstance(current_fig, dict):
-        for tr in current_fig.get("data", []) or []:
-            if tr.get("showlegend") is True:
-                group = tr.get("legendgroup")
-                if group:
-                    group_visibility[group] = tr.get("visible", True)
-
-    # Build a monthly datetime index for forecasting (month-end).
-    monthly_dt_index = x_actual if isinstance(x_actual, pd.DatetimeIndex) else None
-
-    fig = go.Figure()
-
-    palette = px.colors.qualitative.Plotly
-    series = [
-        ("Referrals", "referrals"),
-        ("Waiters", "waiters"),
-        ("Caseload", "caseload"),
-        ("Contacts", "total_contacts"),
-        ("Discharges", "discharges_from_caseload"),
-        ("Clock Stop Actuals", "clock_stop_actuals"),
-    ]
-
-    forecast_added = False
-    forecast_errors: list[str] = []
-
-    for i, (label, col) in enumerate(series):
-        if col not in monthly.columns:
-            continue
-
-        default_visible = col in {"referrals", "clock_stop_actuals"}
-        visible = group_visibility.get(col, True if default_visible else "legendonly")
-
-        color = palette[i % len(palette)]
-
-        # Actuals line
-        fig.add_trace(
-            go.Scatter(
-                x=x_actual,
-                y=monthly[col],
-                name=label,
-                legendgroup=col,
-                showlegend=False,
-                mode="lines",
-                visible=visible,
-                line=dict(width=3, shape="spline", color=color),
-                hovertemplate="%{fullData.name}: <b>%{y:,}</b><extra></extra>",
-            )
-        )
-
-        # Legend marker
-        fig.add_trace(
-            go.Scatter(
-                x=x_actual,
-                y=monthly[col],
-                name=label,
-                legendgroup=col,
-                showlegend=True,
-                mode="markers",
-                visible=visible,
-                marker=dict(size=9, color=color),
-                hoverinfo="skip",
-            )
-        )
-
-        # Forecast overlays: only compute if forecast is ON and this metric is visible
-        metric_is_visible = visible not in (False, "legendonly")
-        if bool(forecast_on) and metric_is_visible and monthly_dt_index is not None:
-            try:
-                y = pd.Series(
-                    pd.to_numeric(monthly[col], errors="coerce").astype(float).values,
-                    index=monthly_dt_index,
-                ).dropna()
-
-                # Auto-select the best model *for this metric + current filtered series*
-                # using a small AIC grid search. Cache both selected specs and forecasts
-                # so legend toggles don't re-fit models.
-                if len(y) >= 12 and y.nunique() >= 2:
-                    sig = _series_signature(y)
-
-                    spec_key = (col, sig)
-                    spec = _lru_get(_best_spec_cache, spec_key)
-                    if spec is None:
-                        y_len = int(len(y))
-                        # Keep the grid small for responsiveness.
-                        p = (0, 1) if y_len < 24 else (0, 1, 2)
-                        q = (0, 1) if y_len < 24 else (0, 1, 2)
-                        # With fewer than ~2 seasonal cycles, avoid seasonal differencing.
-                        D = (0,) if y_len < 24 else (0, 1)
-
-                        spec = small_grid_search_aic(
-                            y,
-                            seasonal_period=12,
-                            p=p,
-                            d=(0, 1),
-                            q=q,
-                            P=(0, 1),
-                            D=D,
-                            Q=(0, 1),
-                            trend="n",
-                        )
-                        _lru_set(
-                            _best_spec_cache, spec_key, spec, maxsize=_SPEC_CACHE_MAX
-                        )
-
-                    fc_key = (col, sig, 12, 0.95, "ME")
-                    future = _lru_get(_forecast_frame_cache, fc_key)
-                    if future is None:
-                        frame = make_forecast_frame(
-                            y,
-                            config=ForecastConfig(
-                                months_ahead=12,
-                                conf_level=0.95,
-                                freq="ME",
-                                auto_select=False,
-                            ),
-                            spec=spec,
-                        )
-                        future = frame[frame["is_forecast"]].copy()
-                        _lru_set(
-                            _forecast_frame_cache,
-                            fc_key,
-                            future,
-                            maxsize=_FORECAST_CACHE_MAX,
-                        )
-                    else:
-                        future = future.copy()
-
-                    if not future.empty:
-                        band_color = _rgba(color, 0.12)
-
-                        # Plotly will not draw a segment between two separate traces.
-                        # To make the forecast visually "join" the historical series,
-                        # prepend the last actual point to the dashed forecast trace.
-                        last_x = y.index.max()
-                        last_y = float(y.iloc[-1])
-                        x_fc = pd.concat(
-                            [
-                                pd.Series([last_x]),
-                                future["period_end"].reset_index(drop=True),
-                            ],
-                            ignore_index=True,
-                        )
-                        yhat_fc = pd.concat(
-                            [
-                                pd.Series([last_y]),
-                                future["yhat"].reset_index(drop=True),
-                            ],
-                            ignore_index=True,
-                        )
-
-                        # CI band (upper then lower with fill)
-                        fig.add_trace(
-                            go.Scatter(
-                                x=future["period_end"],
-                                y=future["yhat_upper"],
-                                name=f"{label} (95% CI)",
-                                legendgroup=col,
-                                showlegend=False,
-                                mode="lines",
-                                line=dict(width=0),
-                                hoverinfo="skip",
-                                visible=True,
-                            )
-                        )
-                        fig.add_trace(
-                            go.Scatter(
-                                x=future["period_end"],
-                                y=future["yhat_lower"],
-                                name=f"{label} (95% CI)",
-                                legendgroup=col,
-                                showlegend=False,
-                                mode="lines",
-                                line=dict(width=0),
-                                fill="tonexty",
-                                fillcolor=band_color,
-                                hoverinfo="skip",
-                                visible=True,
-                            )
-                        )
-
-                        # Forecast dashed line
-                        fig.add_trace(
-                            go.Scatter(
-                                x=x_fc,
-                                y=yhat_fc,
-                                name=f"{label} (Forecast)",
-                                legendgroup=col,
-                                showlegend=False,
-                                mode="lines",
-                                visible=True,
-                                line=dict(width=2, dash="dash", color=color),
-                                hovertemplate=f"{label} (Forecast): <b>%{{y:,.0f}}</b><extra></extra>",
-                            )
-                        )
-
-                        forecast_added = True
-                else:
-                    forecast_errors.append(
-                        f"{label}: insufficient history (need ≥12 months)"
-                    )
-            except Exception as e:
-                logger.warning(f"⚠️ Forecast skipped for '{col}': {e}")
-                forecast_errors.append(f"{label}: {type(e).__name__}")
-
-    fig.update_layout(
-        title=dict(
-            text="Key Metrics Over Time",
-            x=0.5,
-            xanchor="center",
-            font=dict(size=22),
-        ),
-        xaxis_title="Period",
-        yaxis_title="Number of Patients",
-        hovermode="x unified",
-        height=500,
-        template="plotly_white",
-        legend=dict(
-            title=dict(text="Key metrics (click to hide/show)"),
-            orientation="v",
-            yanchor="top",
-            y=1,
-            xanchor="left",
-            x=1.02,
-            bgcolor="rgba(255,255,255,0.85)",
-            bordercolor="rgba(0,0,0,0.08)",
-            borderwidth=1,
-            itemsizing="constant",
-        ),
-        legend_itemclick="toggle",
-        legend_itemdoubleclick="toggleothers",
-        legend_groupclick="togglegroup",
-        margin=dict(l=40, r=200, t=80, b=50),
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
+@app.callback(
+    Output("waiters-timeseries", "figure"),
+    [Input("filtered-data-store", "data"), Input("waiters-forecast-toggle", "value")],
+)
+def update_waiters_timeseries(data_json, forecast_on):
+    if data_json is None:
+        return go.Figure()
+    df = pd.read_json(StringIO(data_json), orient="split")
+    if df.empty:
+        return go.Figure()
+    df["period_end"] = pd.to_datetime(df["period_end"])
+    return _metric_timeseries_figure(
+        df=df,
+        metric="waiters",
+        label="Waiters",
+        color="#EF553B",
+        forecast_on=bool(forecast_on),
     )
 
-    fig.update_xaxes(
-        showgrid=False,
-        tickangle=-30,
-        ticks="outside",
-        ticklen=6,
-        dtick="M1",
-        tickformat="%B %Y",
-        hoverformat="%B %Y",
-    )
-    fig.update_yaxes(
-        tickformat=",",
-        showgrid=True,
-        gridcolor="rgba(0,0,0,0.08)",
-        zeroline=False,
+
+@app.callback(
+    Output("caseload-timeseries", "figure"),
+    [Input("filtered-data-store", "data"), Input("caseload-forecast-toggle", "value")],
+)
+def update_caseload_timeseries(data_json, forecast_on):
+    if data_json is None:
+        return go.Figure()
+    df = pd.read_json(StringIO(data_json), orient="split")
+    if df.empty:
+        return go.Figure()
+    df["period_end"] = pd.to_datetime(df["period_end"])
+    return _metric_timeseries_figure(
+        df=df,
+        metric="caseload",
+        label="Caseload",
+        color="#00CC96",
+        forecast_on=bool(forecast_on),
     )
 
-    # Make the toggle feel responsive even when no forecast could be generated.
-    if bool(forecast_on) and not forecast_added:
-        months_available = int(pd.Series(monthly["year_month"]).nunique())
-        details = (
-            "; ".join(sorted(set(forecast_errors))[:3])
-            if forecast_errors
-            else "No eligible metrics visible"
-        )
-        fig.add_annotation(
-            xref="paper",
-            yref="paper",
-            x=0.01,
-            y=0.99,
-            xanchor="left",
-            yanchor="top",
-            text=(
-                f"Forecast ON, but no forecasts were generated. "
-                f"Months available: {months_available}. {details}"
-            ),
-            showarrow=False,
-            font=dict(size=12, color="rgba(0,0,0,0.65)"),
-            bgcolor="rgba(255,255,255,0.8)",
-            bordercolor="rgba(0,0,0,0.1)",
-            borderwidth=1,
-        )
 
-    return fig
+@app.callback(
+    Output("contacts-timeseries", "figure"),
+    [Input("filtered-data-store", "data"), Input("contacts-forecast-toggle", "value")],
+)
+def update_contacts_timeseries(data_json, forecast_on):
+    if data_json is None:
+        return go.Figure()
+    df = pd.read_json(StringIO(data_json), orient="split")
+    if df.empty:
+        return go.Figure()
+    df["period_end"] = pd.to_datetime(df["period_end"])
+    return _metric_timeseries_figure(
+        df=df,
+        metric="total_contacts",
+        label="Contacts",
+        color="#AB63FA",
+        forecast_on=bool(forecast_on),
+    )
+
+
+@app.callback(
+    Output("discharges-timeseries", "figure"),
+    [
+        Input("filtered-data-store", "data"),
+        Input("discharges-forecast-toggle", "value"),
+    ],
+)
+def update_discharges_timeseries(data_json, forecast_on):
+    if data_json is None:
+        return go.Figure()
+    df = pd.read_json(StringIO(data_json), orient="split")
+    if df.empty:
+        return go.Figure()
+    df["period_end"] = pd.to_datetime(df["period_end"])
+    return _metric_timeseries_figure(
+        df=df,
+        metric="discharges_from_caseload",
+        label="Discharges",
+        color="#FFA15A",
+        forecast_on=bool(forecast_on),
+    )
 
 
 def create_service_line_summary_table(df: pd.DataFrame):
@@ -1364,26 +1245,84 @@ def create_demand_tab(df):
 
     summary_table = create_service_line_summary_table(df)
 
+    def metric_card(title: str, graph_id: str, toggle_id: str):
+        return dbc.Card(
+            [
+                dbc.CardHeader(
+                    dbc.Row(
+                        [
+                            dbc.Col(html.H5(title, className="mb-0"), width=True),
+                            dbc.Col(
+                                dbc.Switch(
+                                    id=toggle_id,
+                                    label="Forecast (ETS, 95% CI)",
+                                    value=False,
+                                ),
+                                width="auto",
+                            ),
+                        ],
+                        align="center",
+                    )
+                ),
+                dbc.CardBody(
+                    dcc.Graph(id=graph_id, figure=go.Figure()),
+                    className="p-2",
+                ),
+            ],
+            className="mb-4 shadow-sm",
+        )
+
     return html.Div(
         [
-            dbc.Alert(
+            dbc.Row(
                 [
-                    html.H4("👥 Demand Analysis", className="alert-heading"),
-                    html.P(
-                        "This section is currently under development. "
-                        "Future features will include:"
+                    dbc.Col(
+                        metric_card(
+                            "Referrals",
+                            "referrals-timeseries",
+                            "referrals-forecast-toggle",
+                        ),
+                        width=6,
                     ),
-                    html.Ul(
-                        [
-                            html.Li("Referrals vs Discharges trends"),
-                            html.Li("Waiting list analysis"),
-                            html.Li("Demand forecasting"),
-                            html.Li("Service capacity utilisation"),
-                        ]
+                    dbc.Col(
+                        metric_card(
+                            "Waiters", "waiters-timeseries", "waiters-forecast-toggle"
+                        ),
+                        width=6,
                     ),
-                ],
-                color="info",
-                className="mt-4",
+                ]
+            ),
+            dbc.Row(
+                [
+                    dbc.Col(
+                        metric_card(
+                            "Caseload",
+                            "caseload-timeseries",
+                            "caseload-forecast-toggle",
+                        ),
+                        width=6,
+                    ),
+                    dbc.Col(
+                        metric_card(
+                            "Contacts",
+                            "contacts-timeseries",
+                            "contacts-forecast-toggle",
+                        ),
+                        width=6,
+                    ),
+                ]
+            ),
+            dbc.Row(
+                [
+                    dbc.Col(
+                        metric_card(
+                            "Discharges",
+                            "discharges-timeseries",
+                            "discharges-forecast-toggle",
+                        ),
+                        width=12,
+                    ),
+                ]
             ),
             dbc.Row(
                 [

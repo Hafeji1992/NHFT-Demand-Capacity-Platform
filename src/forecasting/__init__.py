@@ -1,20 +1,25 @@
-"""Forecasting package (SARIMA) for the NHFT Demand-Capacity Platform.
+"""Forecasting package for the NHFT Demand-Capacity Platform.
 
 This package focuses on *monthly* time series forecasting with 95% confidence
 intervals, suitable for extending the dashboard time-series charts.
 
 Primary entry points:
-- `SarimaForecaster` (fit/forecast)
+- `SarimaForecaster` (SARIMA fit/forecast)
+- `EtsForecaster` (ETS/Holt-Winters fit/forecast)
 - `build_monthly_series` (aggregate raw rows to a monthly series)
-- `make_forecast_frame` (history + forecast + intervals in one DataFrame)
+- `make_forecast_frame` (SARIMA history + forecast + intervals)
+- `make_ets_forecast_frame` (ETS history + forecast + intervals)
 """
 
 from .preprocessing import build_monthly_series
 from .sarima import SarimaForecaster
-from .forecast import make_forecast_frame
+from .ets import EtsForecaster
+from .forecast import make_forecast_frame, make_ets_forecast_frame
 
 __all__ = [
     "SarimaForecaster",
+    "EtsForecaster",
     "build_monthly_series",
     "make_forecast_frame",
+    "make_ets_forecast_frame",
 ]
