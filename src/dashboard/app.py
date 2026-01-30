@@ -36,6 +36,9 @@ from forecasting.ets import EtsSpec, small_grid_search_aic_ets
 # Dash callbacks can fire frequently (legend toggles, filter changes). Keeping a
 # small in-memory cache of selected model specs and forecast frames keyed by the
 # input series signature.
+#
+# NOTE: If the design requiresETS to re-run on every callback (no caching), set this to False.
+ETS_CACHE_ENABLED = False
 _FORECAST_CACHE_MAX = 64
 _SPEC_CACHE_MAX = 128
 _forecast_frame_cache: "OrderedDict[tuple, pd.DataFrame]" = OrderedDict()
@@ -391,9 +394,11 @@ def _metric_timeseries_figure(
 
                 sig = _series_signature(y_fit)
 
-                # AIC-based spec selection (cached)
+                # AIC-based spec selection (optionally cached)
                 spec_key = ("ets_aic_v1", metric, sig)
-                spec = _lru_get(_best_spec_cache, spec_key)
+                spec = (
+                    _lru_get(_best_spec_cache, spec_key) if ETS_CACHE_ENABLED else None
+                )
                 if spec is None:
                     y_len = int(len(y_fit))
                     # Guardrails for short monthly series (~30 months): ETS with
@@ -407,7 +412,10 @@ def _metric_timeseries_figure(
                         seasonal=seasonal_opts,
                         damped_trend=(True, False),
                     )
-                    _lru_set(_best_spec_cache, spec_key, spec, maxsize=_SPEC_CACHE_MAX)
+                    if ETS_CACHE_ENABLED:
+                        _lru_set(
+                            _best_spec_cache, spec_key, spec, maxsize=_SPEC_CACHE_MAX
+                        )
 
                 # Include the selected spec in the forecast cache key to avoid
                 # collisions if the selection settings change.
@@ -422,7 +430,11 @@ def _metric_timeseries_figure(
                     0.95,
                     "ME",
                 )
-                future = _lru_get(_forecast_frame_cache, fc_key)
+                future = (
+                    _lru_get(_forecast_frame_cache, fc_key)
+                    if ETS_CACHE_ENABLED
+                    else None
+                )
                 if future is None:
                     frame = make_ets_forecast_frame(
                         y_fit,
@@ -435,12 +447,13 @@ def _metric_timeseries_figure(
                         spec=spec,
                     )
                     future = frame[frame["is_forecast"]].copy()
-                    _lru_set(
-                        _forecast_frame_cache,
-                        fc_key,
-                        future,
-                        maxsize=_FORECAST_CACHE_MAX,
-                    )
+                    if ETS_CACHE_ENABLED:
+                        _lru_set(
+                            _forecast_frame_cache,
+                            fc_key,
+                            future,
+                            maxsize=_FORECAST_CACHE_MAX,
+                        )
                 else:
                     future = future.copy()
 
@@ -687,7 +700,9 @@ def _overview_key_metrics_figure(
                 sig = _series_signature(y_fit)
 
                 spec_key = ("ets_aic_v1", metric, sig)
-                spec = _lru_get(_best_spec_cache, spec_key)
+                spec = (
+                    _lru_get(_best_spec_cache, spec_key) if ETS_CACHE_ENABLED else None
+                )
                 if spec is None:
                     y_len = int(len(y_fit))
                     seasonal_opts = ("add", None) if y_len >= 24 else (None,)
@@ -698,7 +713,10 @@ def _overview_key_metrics_figure(
                         seasonal=seasonal_opts,
                         damped_trend=(True, False),
                     )
-                    _lru_set(_best_spec_cache, spec_key, spec, maxsize=_SPEC_CACHE_MAX)
+                    if ETS_CACHE_ENABLED:
+                        _lru_set(
+                            _best_spec_cache, spec_key, spec, maxsize=_SPEC_CACHE_MAX
+                        )
 
                 fc_key = (
                     "overview_key_metrics",
@@ -712,7 +730,11 @@ def _overview_key_metrics_figure(
                     0.95,
                     "ME",
                 )
-                future = _lru_get(_forecast_frame_cache, fc_key)
+                future = (
+                    _lru_get(_forecast_frame_cache, fc_key)
+                    if ETS_CACHE_ENABLED
+                    else None
+                )
                 if future is None:
                     frame = make_ets_forecast_frame(
                         y_fit,
@@ -725,12 +747,13 @@ def _overview_key_metrics_figure(
                         spec=spec,
                     )
                     future = frame[frame["is_forecast"]].copy()
-                    _lru_set(
-                        _forecast_frame_cache,
-                        fc_key,
-                        future,
-                        maxsize=_FORECAST_CACHE_MAX,
-                    )
+                    if ETS_CACHE_ENABLED:
+                        _lru_set(
+                            _forecast_frame_cache,
+                            fc_key,
+                            future,
+                            maxsize=_FORECAST_CACHE_MAX,
+                        )
                 else:
                     future = future.copy()
 
