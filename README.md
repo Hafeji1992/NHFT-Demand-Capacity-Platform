@@ -5,7 +5,7 @@ A configurable Demand and Capacity Modelling Platform for NHFT, featuring automa
 
 ## 1. Overview
 
-This project develops a Demand and Capacity Modelling Platform for Northamptonshire Healthcare NHS Foundation Trust (NHFT). It forms part of the ZDAT3001 Year 3 Work-Based Project and aims to address a key organisational need: improving forecasting accuracy, capacity planning, and operational decision-making across 500+ community, mental health, and specialist services.
+This project develops a Demand and Capacity Modelling Platform for Northamptonshire Healthcare NHS Foundation Trust (NHFT). It forms part of the ZDAT3001 Year 3 Work-Based Project and aims to address a key organisational need: improving forecasting accuracy, capacity planning, and operational decision-making across the multitude of community, mental health, and specialist services.
 
 The platform integrates:
 
@@ -70,7 +70,7 @@ Implements multiple models including:
 ## 5. Repository Structure
 
 ```plaintext
-nhft-demand-capacity-modelling-platform/
+NHFT-DEMAND-CAPACITY-PLATFORM/
 ├── docs/
 │   ├── Ethical-and-Legal-Assessment.pdf
 │   ├── Project-Agreement.pdf
@@ -81,30 +81,33 @@ nhft-demand-capacity-modelling-platform/
 │
 ├── src/
 │   ├── analysis/
-│   │   ├── __pycache__/
 │   │   ├── patient_summary_statistics.py
 │   │   └── staffing_summary_statistics.py
 │   │
 │   ├── dashboard/
-│   │   ├── __pycache__/
 │   │   ├── app.py
 │   │   ├── data_handler.py
 │   │   └── README.md
 │   │
-│   └── data_engineering/
-│       ├── __pycache__/
-│       ├── connect.py
-│       ├── master_data_ingestion.py
-│       ├── patient_data_ingestion.py
-│       ├── staffing_data_ingestion.py
-│       └── README.md
-│
-├── tests/
-│   ├── __pycache__/
-│   ├── .pytest_cache/
-│   ├── test_patient_data_ingestion.py
-│   ├── test_sql_connection.py
-│   └── test_staffing_data_ingestion.py
+│   ├── data_engineering/
+│   │   ├── connect.py
+│   │   ├── master_data_ingestion.py
+│   │   ├── patient_data_ingestion.py
+│   │   ├── staffing_data_ingestion.py
+│   │   └── README.md
+│   │
+│   ├── forecasting/
+│   │   ├── __init__.py
+│   │   ├── forecast.py
+│   │   ├── preprocessing.py
+│   │   ├── sarima.py
+│   │   ├── sarima_report.py
+│   │   └── README.md
+│   │
+│   └── tests/
+│       ├── test_patient_data_ingestion.py
+│       ├── test_sql_connection.py
+│       └── test_staffing_data_ingestion.py
 │
 ├── .gitignore
 ├── config.ini
@@ -188,7 +191,7 @@ As defined in the Project Plan (Section 2, p. 1) :
 | Project Documentation & Governance     | ✅ Completed | Early Dec 2025    | 08/12/2025      | 30          | Project Agreement, Plan, Methodology, Ethics & Legal all completed |
 | Data Access & Infrastructure Setup     | ✅ Completed | Mid Dec 2025      | 15/12/2025      | 15          | SQL access, governance approvals, secure Python environment |
 | Data Engineering & Automation Pipeline | ✅ Completed | Early Jan 2026    | 22/12/2025      | 30          | Direct-query pipeline, validation scripts, staffing & demand ingestion |
-| Forecasting Module (MVP)               | 📁 In Progress  | Early Feb 2026    | —               | —           | ARIMA/ETS/XGB models and selection logic |
+| Forecasting Module (MVP)               | 📁 In Progress  | Early Feb 2026    | —               | 37.5           | ARIMA/ETS/XGB models and selection logic |
 | Capacity & Simulation Module           | ⏳ Upcoming  | Mid Feb 2026      | —               | —           | Queueing and simulation with SimPy |
 | Dash Application Development           | 📁 In Progress  | End Feb 2026      | —               | 15           | Interactive dashboard with scenarios |
 | Testing, Validation & Refinement       | ⏳ Upcoming  | End Feb 2026      | —               | —           | Forecast evaluation, stakeholder testing |
@@ -235,8 +238,6 @@ flowchart TD
 
     subgraph Forecasting_Engine
         ARIMA[ARIMA Model]
-        ETS[ETS Model]
-        XGB[Gradient Boosting]
         ModelSelect[Model Selection]
     end
 
