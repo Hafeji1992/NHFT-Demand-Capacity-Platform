@@ -1237,91 +1237,6 @@ def create_overview_tab(df):
     )
 
     # -----------------------------
-    # 18-week waiters split (stacked bar)
-    # -----------------------------
-    waiters_18wk = df_sorted.groupby("year_month", as_index=False).agg(
-        waiters_under_18_weeks=("waiters_under_18_weeks", "sum"),
-        waiters_over_18_weeks=("waiters_over_18_weeks", "sum"),
-    )
-
-    fig_18wk = go.Figure()
-
-    fig_18wk.add_trace(
-        go.Bar(
-            x=waiters_18wk["year_month"],
-            y=waiters_18wk["waiters_under_18_weeks"],
-            name="Under 18 Weeks",
-            marker_color="#636EFA",  # Plotly blue
-            hovertemplate="%{fullData.name}: <b>%{y:,}</b><extra></extra>",
-        )
-    )
-
-    fig_18wk.add_trace(
-        go.Bar(
-            x=waiters_18wk["year_month"],
-            y=waiters_18wk["waiters_over_18_weeks"],
-            name="18+ Weeks",
-            marker_color="#EF553B",  # Plotly red
-            hovertemplate="%{fullData.name}: <b>%{y:,}</b><extra></extra>",
-        )
-    )
-
-    fig_18wk.update_layout(
-        title=dict(
-            text="Waiting List Breakdown: Under vs Over 18 Weeks",
-            x=0.5,
-            xanchor="center",
-            font=dict(size=20),
-        ),
-        xaxis_title="Period",
-        yaxis_title="Number of Waiters",
-        barmode="stack",
-        height=400,
-        hovermode="x unified",
-        template="plotly_white",
-        legend=dict(
-            title=dict(text="Waiters split (click to hide/show)"),
-            orientation="v",
-            yanchor="top",
-            y=1,
-            xanchor="left",
-            x=1.02,
-            bgcolor="rgba(255,255,255,0.85)",
-            bordercolor="rgba(0,0,0,0.08)",
-            borderwidth=1,
-            itemsizing="constant",
-        ),
-        legend_itemclick="toggle",
-        legend_itemdoubleclick="toggleothers",
-        margin=dict(l=40, r=200, t=70, b=50),
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-    )
-
-    fig_18wk.update_xaxes(
-        showgrid=False,
-        tickangle=-30,
-        ticks="outside",
-        ticklen=6,
-    )
-    fig_18wk.update_yaxes(
-        tickformat=",",
-        showgrid=True,
-        gridcolor="rgba(0,0,0,0.08)",
-        zeroline=False,
-    )
-
-    waiters_chart = dbc.Row(
-        [
-            dbc.Col(
-                dcc.Graph(figure=fig_18wk),
-                width=12,
-            ),
-        ],
-        className="mb-4",
-    )
-
-    # -----------------------------
     # Capacity: Staff vs Caseload (latest)
     # -----------------------------
     staff_vs_caseload_card = None
@@ -1351,6 +1266,26 @@ def create_overview_tab(df):
                 )
 
     # -----------------------------
+    # 18-week waiters split (stacked bar)
+    # -----------------------------
+    fig_18wk = _waiters_18wk_breakdown_figure(df_sorted)
+    waiters_chart = dbc.Card(
+        [
+            dbc.CardHeader(
+                html.H5(
+                    "Waiting List Breakdown (Under vs Over 18 Weeks)",
+                    className="mb-0",
+                )
+            ),
+            dbc.CardBody(
+                dcc.Graph(id="overview-waiters-breakdown", figure=fig_18wk),
+                className="p-2",
+            ),
+        ],
+        className="mb-4 shadow-sm",
+    )
+
+    # -----------------------------
     # Layout
     # -----------------------------
     return html.Div(
@@ -1370,13 +1305,85 @@ def create_overview_tab(df):
                 id="overview-keymetrics-visible-metrics",
                 data=default_visible_metrics,
             ),
-            # Key metrics combined time-series (legend selectable)
             key_metrics_chart,
             staff_vs_caseload_card,
-            # Stacked 18-week bar chart
             waiters_chart,
         ]
     )
+
+
+def _waiters_18wk_breakdown_figure(df_sorted: pd.DataFrame) -> go.Figure:
+    """Build the stacked bar chart for under/over 18-week waiters by month."""
+    base = df_sorted.copy()
+    if "year_month" not in base.columns:
+        base["year_month"] = (
+            pd.to_datetime(base["period_end"]).dt.to_period("M").astype(str)
+        )
+
+    waiters_18wk = base.groupby("year_month", as_index=False).agg(
+        waiters_under_18_weeks=("waiters_under_18_weeks", "sum"),
+        waiters_over_18_weeks=("waiters_over_18_weeks", "sum"),
+    )
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Bar(
+            x=waiters_18wk["year_month"],
+            y=waiters_18wk["waiters_under_18_weeks"],
+            name="Under 18 Weeks",
+            marker_color="#636EFA",
+            hovertemplate="%{fullData.name}: <b>%{y:,}</b><extra></extra>",
+        )
+    )
+    fig.add_trace(
+        go.Bar(
+            x=waiters_18wk["year_month"],
+            y=waiters_18wk["waiters_over_18_weeks"],
+            name="18+ Weeks",
+            marker_color="#EF553B",
+            hovertemplate="%{fullData.name}: <b>%{y:,}</b><extra></extra>",
+        )
+    )
+
+    fig.update_layout(
+        title=None,
+        xaxis_title="Period",
+        yaxis_title="Number of Waiters",
+        barmode="stack",
+        height=400,
+        hovermode="x unified",
+        template="plotly_white",
+        legend=dict(
+            title=dict(text="Waiters split (click to hide/show)"),
+            orientation="v",
+            yanchor="top",
+            y=1,
+            xanchor="left",
+            x=1.02,
+            bgcolor="rgba(255,255,255,0.85)",
+            bordercolor="rgba(0,0,0,0.08)",
+            borderwidth=1,
+            itemsizing="constant",
+        ),
+        legend_itemclick="toggle",
+        legend_itemdoubleclick="toggleothers",
+        margin=dict(l=40, r=200, t=70, b=50),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+    )
+    fig.update_xaxes(
+        showgrid=False,
+        tickangle=-30,
+        ticks="outside",
+        ticklen=6,
+    )
+    fig.update_yaxes(
+        tickformat=",",
+        showgrid=True,
+        gridcolor="rgba(0,0,0,0.08)",
+        zeroline=False,
+    )
+    return fig
 
 
 @app.callback(
@@ -1966,6 +1973,30 @@ def create_demand_tab(df):
         A Dash layout component containing the demand alert and patient summary table.
     """
 
+    df_sorted = df.sort_values("period_end")
+    if "year_month" not in df_sorted.columns:
+        df_sorted = df_sorted.copy()
+        df_sorted["year_month"] = (
+            pd.to_datetime(df_sorted["period_end"]).dt.to_period("M").astype(str)
+        )
+
+    fig_18wk = _waiters_18wk_breakdown_figure(df_sorted)
+    waiters_breakdown_card = dbc.Card(
+        [
+            dbc.CardHeader(
+                html.H5(
+                    "Waiting List Breakdown (Under vs Over 18 Weeks)",
+                    className="mb-0",
+                )
+            ),
+            dbc.CardBody(
+                dcc.Graph(id="demand-waiters-breakdown", figure=fig_18wk),
+                className="p-2",
+            ),
+        ],
+        className="mb-4 shadow-sm",
+    )
+
     summary_table = create_service_line_summary_table(df)
 
     def metric_card(title: str, graph_id: str, toggle_id: str):
@@ -2057,6 +2088,7 @@ def create_demand_tab(df):
                     ),
                 ]
             ),
+            waiters_breakdown_card,
             dbc.Row(
                 [
                     dbc.Col(
