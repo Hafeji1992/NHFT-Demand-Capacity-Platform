@@ -68,7 +68,6 @@ Implements multiple models including:
 - Accessible, interpretable design for operational managers
 
 ## 5. Repository Structure
-
 ```plaintext
 nhft-demand-capacity-modelling-platform/
 ├── docs/
@@ -81,30 +80,38 @@ nhft-demand-capacity-modelling-platform/
 │
 ├── src/
 │   ├── analysis/
-│   │   ├── __pycache__/
 │   │   ├── patient_summary_statistics.py
 │   │   └── staffing_summary_statistics.py
 │   │
 │   ├── dashboard/
-│   │   ├── __pycache__/
 │   │   ├── app.py
 │   │   ├── data_handler.py
 │   │   └── README.md
 │   │
-│   └── data_engineering/
-│       ├── __pycache__/
-│       ├── connect.py
-│       ├── master_data_ingestion.py
-│       ├── patient_data_ingestion.py
-│       ├── staffing_data_ingestion.py
-│       └── README.md
+│   ├── data_engineering/
+│   │   ├── connect.py
+│   │   ├── master_data_ingestion.py
+│   │   ├── patient_data_ingestion.py
+│   │   ├── staffing_data_ingestion.py
+│   │   └── README.md
+│   │
+│   └── forecasting/
+│       ├── README.md
+│       ├── __init__.py
+│       ├── preprocessing.py
+│       ├── forecast.py
+│       ├── ets.py
+│       ├── ets_report.py
+│       └── archived_sarima/
+│           ├── __init__.py
+│           ├── sarima.py
+│           └── sarima_report.py
 │
 ├── tests/
-│   ├── __pycache__/
-│   ├── .pytest_cache/
 │   ├── test_patient_data_ingestion.py
 │   ├── test_sql_connection.py
-│   └── test_staffing_data_ingestion.py
+│   ├── test_staffing_data_ingestion.py
+│   └── test_forecasting.py
 │
 ├── .gitignore
 ├── config.ini
