@@ -383,6 +383,7 @@ def _metric_timeseries_figure(
     label: str,
     color: str,
     forecast_on: bool,
+    monthly_ticks: bool = True,
 ) -> go.Figure:
     """Create a single-metric time series figure with optional ETS forecast."""
     y = _monthly_series_from_filtered_df(df, metric)
@@ -393,15 +394,8 @@ def _metric_timeseries_figure(
             title=dict(text=label, x=0.5, xanchor="center"),
             template="plotly_white",
             height=420,
-        )
-        fig.add_annotation(
-            xref="paper",
-            yref="paper",
-            x=0.5,
-            y=0.5,
-            text="No data available for selected filters",
-            showarrow=False,
-            font=dict(size=14, color="rgba(0,0,0,0.65)"),
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
         )
         return fig
 
@@ -429,7 +423,6 @@ def _metric_timeseries_figure(
         )
     )
 
-    # Optional forecast (only for this metric)
     if bool(forecast_on):
         try:
             if len(y) >= 12 and y.nunique() >= 2:
@@ -613,10 +606,11 @@ def _metric_timeseries_figure(
         tickangle=-30,
         ticks="outside",
         ticklen=6,
-        dtick="M1",
-        tickformat="%B %Y",
-        hoverformat="%B %Y",
+        tickformat="%b %Y",
+        hoverformat="%b %Y",
     )
+    if bool(monthly_ticks):
+        fig.update_xaxes(dtick="M1")
     fig.update_yaxes(
         tickformat=",",
         showgrid=True,
@@ -1361,7 +1355,7 @@ def create_overview_tab(df):
     # -----------------------------
     # 18-week waiters split (stacked bar)
     # -----------------------------
-    fig_18wk = _waiters_18wk_breakdown_figure(df_sorted)
+    fig_18wk = _waiters_18wk_breakdown_figure(df_sorted, monthly_ticks=True)
     waiters_chart = dbc.Card(
         [
             dbc.CardHeader(
@@ -1409,7 +1403,11 @@ def create_overview_tab(df):
     )
 
 
-def _waiters_18wk_breakdown_figure(df_sorted: pd.DataFrame) -> go.Figure:
+def _waiters_18wk_breakdown_figure(
+    df_sorted: pd.DataFrame,
+    *,
+    monthly_ticks: bool = False,
+) -> go.Figure:
     """Build the stacked bar chart for under/over 18-week waiters by month."""
     base = df_sorted.copy()
     if "year_month" not in base.columns:
@@ -1422,10 +1420,15 @@ def _waiters_18wk_breakdown_figure(df_sorted: pd.DataFrame) -> go.Figure:
         waiters_over_18_weeks=("waiters_over_18_weeks", "sum"),
     )
 
+    # Use a real date x-axis so we can control tick density.
+    x_dates = pd.PeriodIndex(waiters_18wk["year_month"].astype(str), freq="M").to_timestamp(
+        "M"
+    )
+
     fig = go.Figure()
     fig.add_trace(
         go.Bar(
-            x=waiters_18wk["year_month"],
+            x=x_dates,
             y=waiters_18wk["waiters_under_18_weeks"],
             name="Under 18 Weeks",
             marker_color="#636EFA",
@@ -1434,7 +1437,7 @@ def _waiters_18wk_breakdown_figure(df_sorted: pd.DataFrame) -> go.Figure:
     )
     fig.add_trace(
         go.Bar(
-            x=waiters_18wk["year_month"],
+            x=x_dates,
             y=waiters_18wk["waiters_over_18_weeks"],
             name="18+ Weeks",
             marker_color="#EF553B",
@@ -1473,7 +1476,11 @@ def _waiters_18wk_breakdown_figure(df_sorted: pd.DataFrame) -> go.Figure:
         tickangle=-30,
         ticks="outside",
         ticklen=6,
+        tickformat="%b %Y",
+        hoverformat="%b %Y",
     )
+    if bool(monthly_ticks):
+        fig.update_xaxes(dtick="M1")
     fig.update_yaxes(
         tickformat=",",
         showgrid=True,
@@ -1577,6 +1584,7 @@ def update_referrals_timeseries(data_json, forecast_on):
         label="Referrals",
         color="#636EFA",
         forecast_on=bool(forecast_on),
+        monthly_ticks=False,
     )
 
 
@@ -1597,6 +1605,7 @@ def update_waiters_timeseries(data_json, forecast_on):
         label="Waiters",
         color="#EF553B",
         forecast_on=bool(forecast_on),
+        monthly_ticks=False,
     )
 
 
@@ -1617,6 +1626,7 @@ def update_caseload_timeseries(data_json, forecast_on):
         label="Caseload",
         color="#00CC96",
         forecast_on=bool(forecast_on),
+        monthly_ticks=False,
     )
 
 
@@ -1637,6 +1647,7 @@ def update_contacts_timeseries(data_json, forecast_on):
         label="Contacts",
         color="#AB63FA",
         forecast_on=bool(forecast_on),
+        monthly_ticks=False,
     )
 
 
@@ -1660,6 +1671,7 @@ def update_discharges_timeseries(data_json, forecast_on):
         label="Discharges",
         color="#FFA15A",
         forecast_on=bool(forecast_on),
+        monthly_ticks=False,
     )
 
 
@@ -2077,7 +2089,7 @@ def create_demand_tab(df):
             pd.to_datetime(df_sorted["period_end"]).dt.to_period("M").astype(str)
         )
 
-    fig_18wk = _waiters_18wk_breakdown_figure(df_sorted)
+    fig_18wk = _waiters_18wk_breakdown_figure(df_sorted, monthly_ticks=False)
     waiters_breakdown_card = dbc.Card(
         [
             dbc.CardHeader(
@@ -2185,11 +2197,14 @@ def create_demand_tab(df):
                             "discharges-timeseries",
                             "discharges-forecast-toggle",
                         ),
-                        width=12,
+                        width=6,
+                    ),
+                    dbc.Col(
+                        waiters_breakdown_card,
+                        width=6,
                     ),
                 ]
             ),
-            waiters_breakdown_card,
             dbc.Row(
                 [
                     dbc.Col(
