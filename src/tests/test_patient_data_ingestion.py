@@ -70,24 +70,18 @@ class FakeSQLServerConnection:
             "period_end",
             "referrals",
             "clock_stop_actuals",
-            "discharges_no_clock_stop",
-            "referral_clock_stop_ratio",
-            "referral_discharged_no_clock_stop_ratio",
-            "demand_ratio",
             "total_contacts",
             "ftf_contacts",
             "caseload",
             "total_caseload_contacts",
             "ftf_caseload_contacts",
-            "total_contacts_per_caseload",
-            "ftf_contacts_per_caseload",
             "waiters",
-            "waiters_under_18_weeks",
             "waiters_over_18_weeks",
             "average_length_of_treatment",
             "average_contacts_at_discharge",
             "average_ftf_contacts_at_discharge",
-            "discharges_from_caseload",
+            "discharges_no_clock_stop",
+            "discharges_with_clock_stop",
         ]
 
         rows = [
@@ -98,22 +92,17 @@ class FakeSQLServerConnection:
                 10,
                 8,
                 1,
-                0.8,
-                0.1,
-                1.25,
                 20,
                 15,
                 30,
                 12,
                 8,
-                0.4,
-                0.27,
                 5,
                 3,
                 2,
                 42.0,
                 3.5,
-                2.1,
+                2,
                 7,
             )
         ]
@@ -131,7 +120,6 @@ def test_normalise_column_names():
     normalised = PatientDataExtractor._normalise_column_names(cols)
 
     assert normalised == [
-        "waiters_under_18_weeks",
         "waiters_over_18_weeks",
         "service_line",
         "ftf_contacts",
@@ -211,13 +199,12 @@ def test_load_patient_data_reads_csv(tmp_path, monkeypatch):
             "referrals": [10, 20],
             "clock_stop_actuals": [8, 15],
             "waiters": [5, 6],
-            "waiters_under_18_weeks": [3, 4],
             "waiters_over_18_weeks": [2, 2],
             "caseload": [30, 35],
             "total_contacts": [20, 25],
             "ftf_contacts": [15, 18],
             "discharges_no_clock_stop": [1, 2],
-            "discharges_from_caseload": [7, 8],
+            "discharges_with_clock_stop": [7, 8],
         }
     )
     df_in.to_csv(test_file, index=False)

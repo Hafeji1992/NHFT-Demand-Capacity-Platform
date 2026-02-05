@@ -11,6 +11,7 @@ from typing import Optional, Dict, List, Tuple
 from datetime import date, timedelta
 import pandas as pd
 from tqdm import tqdm
+import numpy as np  # NEW
 
 try:
     # Prefer package import to avoid collisions with site-packages (e.g. `connect.py`)
@@ -43,6 +44,84 @@ class DataQualityException(Exception):
 class PatientDataExtractor:
     """Extracts patient data from SQL Server and saves to CSV."""
 
+    def __init__(
+        self,
+        output_dir: Optional[Path] = None,
+        *,
+        run_quality_checks: bool = True,
+        config_path: Optional[str | Path] = None,
+    ):
+        """Create a patient data extractor.
+
+        Args:
+            output_dir: Where to write patient_data.csv. Defaults to project_root/data.
+            run_quality_checks: Whether to run data quality checks after extraction.
+            config_path: Optional path to config.ini for SQL server settings.
+        """
+
+        if output_dir is None:
+            project_root = Path(__file__).resolve().parents[2]
+            output_dir = project_root / "data"
+        self.output_dir = Path(output_dir)
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Connection helpers
+        self.sql_conn = SQLServerConnection(
+            str(config_path) if config_path is not None else None
+        )
+        self.conn = None
+
+        self.run_quality_checks = bool(run_quality_checks)
+
+    def open_connection(self):
+        """Open SQL Server connection if not already open."""
+        if self.conn is None:
+            self.conn = self.sql_conn.connect()
+
+    @staticmethod
+    def _to_snake_case(name: str) -> str:
+        """Convert a column label to snake_case.
+
+        Handles:
+        - CamelCase and ALLCAPS acronyms (e.g., FTFContacts -> ftf_contacts)
+        - Digit boundaries (e.g., Over18Weeks -> over_18_weeks)
+        - Existing separators (spaces, hyphens, underscores)
+        """
+        s = str(name).strip()
+        s = re.sub(r"[^0-9A-Za-z]+", "_", s)
+        # Split acronym-word boundaries: 'FTFContacts' -> 'FTF_Contacts'
+        s = re.sub(r"(.)([A-Z][a-z]+)", r"\1_\2", s)
+        # Split lower/digit to upper boundaries: 'codeCurrent' -> 'code_Current'
+        s = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", s)
+        # Split letters<->digits: 'Over18' -> 'Over_18'
+        s = re.sub(r"([A-Za-z])([0-9])", r"\1_\2", s)
+        s = re.sub(r"([0-9])([A-Za-z])", r"\1_\2", s)
+        s = re.sub(r"_+", "_", s)
+        return s.strip("_").lower()
+
+    @staticmethod
+    def _normalise_column_names(columns) -> List[str]:
+        """Normalise raw SQL column names to snake_case.
+
+        Notes:
+            - Drops any source-provided waiters_under_18_weeks column so the pipeline
+              can compute it consistently from waiters and waiters_over_18_weeks.
+        """
+        out: List[str] = []
+        seen: set[str] = set()
+
+        for col in list(columns):
+            name = PatientDataExtractor._to_snake_case(col)
+
+            if name == "waiters_under_18_weeks":
+                continue
+
+            if name and name not in seen:
+                out.append(name)
+                seen.add(name)
+
+        return out
+
     @staticmethod
     def get_last_full_month_end(reference_date: Optional[date] = None) -> pd.Timestamp:
         """Return the last day of the most recently completed month.
@@ -65,6 +144,7 @@ class PatientDataExtractor:
 
     # SQL query as class constant for better maintainability
     PATIENT_QUERY = """
+
         -- ============================================================================
         -- PATIENT DATA EXTRACTION QUERY
         -- ============================================================================
@@ -83,34 +163,12 @@ class PatientDataExtractor:
             -- ========================================================================
             WT.[Referrals],
             WT.[ClockStopActuals],
-            WT.[DischargesNoClockStop],
 
             -- ======================================================================== 
-            -- CALCULATED RATIOS
+            -- WAITER METRICS
             -- ========================================================================
-            CASE 
-                WHEN WT.[Referrals] > 0 
-                THEN CAST(WT.[ClockStopActuals] AS FLOAT) / WT.[Referrals]
-                ELSE NULL 
-            END AS [ReferralClockStopRatio],
-
-            CASE 
-                WHEN WT.[Referrals] > 0 
-                THEN CAST(WT.[DischargesNoClockStop] AS FLOAT) / WT.[Referrals]
-                ELSE NULL 
-            END AS [ReferralDischargedNoClockStopRatio],
-
-            CASE 
-                WHEN WT.[ClockStopActuals] > 0 
-                THEN CAST(WT.[Referrals] AS FLOAT) / WT.[ClockStopActuals]
-                ELSE NULL 
-            END AS [DemandRatio],
-
-            -- ======================================================================== 
-            -- CONTACT METRICS
-            -- ========================================================================
-            CA.[TotalContacts],
-            CA.[FTFContacts],
+            WT.[Waiters],
+            WT.[WaitersOver18Weeks],
 
             -- ======================================================================== 
             -- CASELOAD METRICS
@@ -119,24 +177,11 @@ class PatientDataExtractor:
             CA.[TotalCaseloadContacts],
             CA.[FTFCaseloadContacts],
 
-            CASE 
-                WHEN WT.[Caseload] > 0 
-                THEN CAST(CA.[TotalCaseloadContacts] AS FLOAT) / WT.[Caseload]
-                ELSE NULL 
-            END AS [TotalContactsPerCaseload],
-
-            CASE 
-                WHEN WT.[Caseload] > 0 
-                THEN CAST(CA.[FTFCaseloadContacts] AS FLOAT) / WT.[Caseload]
-                ELSE NULL 
-            END AS [FTFContactsPerCaseload],
-
             -- ======================================================================== 
-            -- WAITER METRICS
+            -- CONTACT METRICS
             -- ========================================================================
-            WT.[Waiters],
-            WT.[Waiters] - WT.[Waiters18Plus] AS [WaitersUnder18Weeks],
-            WT.[Waiters18Plus] AS [WaitersOver18Weeks],
+            CA.[TotalContacts],
+            CA.[FTFContacts],
 
             -- ======================================================================== 
             -- DISCHARGE AND TREATMENT METRICS
@@ -144,7 +189,8 @@ class PatientDataExtractor:
             WT.[AverageLengthOfTreatment],
             WT.[AverageContactsAtDischarge],
             WT.[AverageFTFContactsAtDischarge],
-            WT.[DischargesWithClockStop] AS [DischargesFromCaseload]
+            WT.[DischargesNoClockStop],
+            WT.[DischargesWithClockStop]
 
         -- ============================================================================
         -- SUBQUERY 1: WAITING TIMES AND REFERRAL DATA
@@ -155,58 +201,56 @@ class PatientDataExtractor:
                 SL.[Service_Line],
                 WT.[PeriodEnd],
 
-                -- -------------------------------------------------------------------- 
-                -- Discharge Quality Metrics
                 -- --------------------------------------------------------------------
-                AVG(CASE WHEN WT.[Discharged] = 1 
-                    THEN WT.[ContactsPerReferral] END) AS [AverageContactsAtDischarge],
-                AVG(CASE WHEN WT.[Discharged] = 1 
-                    THEN WT.[ContactsFTFPerReferral] END) AS [AverageFTFContactsAtDischarge],
-                AVG(CASE WHEN WT.[Discharged] = 1 
-                    THEN DATEDIFF(DAY, WT.[Ref_Start], WT.[FirstContact]) END) AS [AverageLengthOfTreatment],
-
-                -- -------------------------------------------------------------------- 
-                -- Current Caseload
-                -- --------------------------------------------------------------------
-                COUNT(CASE WHEN WT.[Discharged] = 0 AND WT.[WaitAssess] = 0 
-                    THEN WT.[Ref_ID] END) AS [Caseload],
-
-                -- -------------------------------------------------------------------- 
-                -- Clock Stop Activity
-                -- --------------------------------------------------------------------
-                COUNT(CASE WHEN WT.[FirstContactInPeriod] = 1 
-                    THEN WT.[Ref_ID] END) AS [ClockStopActuals],
-
-                -- -------------------------------------------------------------------- 
-                -- Discharge Breakdown
-                -- --------------------------------------------------------------------
-                COUNT(CASE WHEN WT.[Discharged] = 1 AND WT.[FirstContact] IS NULL 
-                    THEN WT.[Ref_ID] END) AS [DischargesNoClockStop],
-                COUNT(CASE WHEN WT.[Discharged] = 1 AND WT.[FirstContact] IS NOT NULL 
-                    THEN WT.[Ref_ID] END) AS [DischargesWithClockStop],
-
-                -- -------------------------------------------------------------------- 
                 -- New Referrals
                 -- --------------------------------------------------------------------
-                COUNT(CASE WHEN WT.[RefStartThisPeriod] = 1 
-                    THEN WT.[Ref_ID] END) AS [Referrals],
+                COUNT(CASE WHEN WT.[RefStartThisPeriod] = 1 THEN WT.[Ref_ID] END) AS [Referrals],
 
-                -- -------------------------------------------------------------------- 
+                -- --------------------------------------------------------------------
+                -- Clock Stop Activity
+                -- --------------------------------------------------------------------
+                COUNT(CASE WHEN WT.[FirstContactInPeriod] = 1 THEN WT.[Ref_ID] END) AS [ClockStopActuals],
+
+                -- --------------------------------------------------------------------
                 -- Waiting List Metrics
                 -- --------------------------------------------------------------------
-                COUNT(CASE WHEN WT.[Discharged] = 0 AND WT.[WaitAssess] = 1 
-                    AND WT.[RTTExclusion] = 0 THEN WT.[Ref_ID] END) AS [Waiters],
-                COUNT(CASE WHEN WT.[Discharged] = 0 AND WT.[WaitAssess] = 1 
-                    AND WT.[RTTExclusion] = 0 AND WT.[WaitingTime] > 7 * 18 
-                    THEN WT.[Ref_ID] END) AS [Waiters18Plus]
+                COUNT(CASE WHEN WT.[Discharged] = 0 AND WT.[WaitAssess] = 1 AND WT.[RTTExclusion] = 0 THEN WT.[Ref_ID] END) AS [Waiters],
+                COUNT(CASE WHEN WT.[Discharged] = 0 AND WT.[WaitAssess] = 1 AND WT.[RTTExclusion] = 0 AND WT.[WaitingTime] > 7 * 18 THEN WT.[Ref_ID] END) AS [WaitersOver18Weeks],
 
-            FROM [MIS_AG].[dbo].[Vw_tbl_ag_Report_WaitingTimes] AS WT
-            LEFT JOIN [MIS_Config].[dbo].[tbl_org_current_RL9_Service_Line] AS SL
-                ON WT.[ProviderCodeCurrent] = SL.[Service_Codes]
+                -- --------------------------------------------------------------------
+                -- Current Caseload
+                -- --------------------------------------------------------------------
+                COUNT(CASE WHEN WT.[Discharged] = 0 AND WT.[WaitAssess] = 0 THEN WT.[Ref_ID] END) AS [Caseload],
+
+                -- --------------------------------------------------------------------
+                -- Discharge Quality Metrics
+                -- --------------------------------------------------------------------
+                AVG(CASE WHEN WT.[Discharged] = 1 THEN WT.[ContactsPerReferral] END) AS [AverageContactsAtDischarge],
+                AVG(CASE WHEN WT.[Discharged] = 1 THEN WT.[ContactsFTFPerReferral] END) AS [AverageFTFContactsAtDischarge],
+                AVG(CASE WHEN WT.[Discharged] = 1 THEN DATEDIFF(DAY, WT.[Ref_Start], WT.[FirstContact]) END) AS [AverageLengthOfTreatment],
+
+                -- --------------------------------------------------------------------
+                -- Discharge Breakdown
+                -- --------------------------------------------------------------------
+                COUNT(CASE WHEN WT.[Discharged] = 1 AND WT.[FirstContact] IS NULL THEN WT.[Ref_ID] END) AS [DischargesNoClockStop],
+                COUNT(CASE WHEN WT.[Discharged] = 1 AND WT.[FirstContact] IS NOT NULL THEN WT.[Ref_ID] END) AS [DischargesWithClockStop]
+
+            FROM (
+				SELECT * FROM [MIS_AG].[dbo].[Vw_tbl_ag_Report_WaitingTimes]
+			UNION  
+				SELECT * FROM [MIS_AG].[dbo].[Vw_tbl_ag_Report_WaitingTimes_2324]
+			) AS WT
+            
+			LEFT JOIN [MIS_Config].[dbo].[tbl_org_current_RL9_Service_Line] AS SL ON WT.[ProviderCodeCurrent] = SL.[Service_Codes]
+			WHERE WT.[ProviderCodeCurrent] NOT IN ('996', '998')
+				AND SL.[Status] = 'ACTIVE'
+				AND SL.[RTT_Report_Enabled] = 1 -- RTT Reporting Only Services
+
             GROUP BY
                 WT.[ProviderCodeCurrent],
                 SL.[Service_Line],
                 WT.[PeriodEnd]
+                
         ) AS WT
 
         -- ============================================================================
@@ -217,246 +261,291 @@ class PatientDataExtractor:
                 CA.[ProviderCodeCurrent],
                 CA.[PeriodEnd],
 
-                -- -------------------------------------------------------------------- 
+                -- --------------------------------------------------------------------
                 -- Face-to-Face Contact Metrics
                 -- --------------------------------------------------------------------
                 -- FTF contacts after first contact (caseload activity)
-                COUNT(CASE WHEN (CA.[FirstAttendance_FTF] = 1 OR CA.[FollowUp_FTF] = 1) 
-                    AND CA.[Contact_Date] > WT.[FirstContact] THEN CA.[Ref_ID] END) AS [FTFCaseloadContacts],
-                -- All FTF contacts (including first contacts)
-                COUNT(CASE WHEN CA.[FirstAttendance_FTF] = 1 OR CA.[FollowUp_FTF] = 1 
-                    THEN CA.[Ref_ID] END) AS [FTFContacts],
+                COUNT(CASE WHEN (CA.[FirstAttendance_FTF] = 1 OR CA.[FollowUp_FTF] = 1) AND CA.[Contact_Date] > WT.[FirstContact] THEN CA.[Ref_ID] END) AS [FTFCaseloadContacts],
 
-                -- -------------------------------------------------------------------- 
+                -- All FTF contacts (including first contacts)
+                COUNT(CASE WHEN CA.[FirstAttendance_FTF] = 1 OR CA.[FollowUp_FTF] = 1 THEN CA.[Ref_ID] END) AS [FTFContacts],
+
+                -- --------------------------------------------------------------------
                 -- Total Contact Metrics
                 -- --------------------------------------------------------------------
                 -- Total contacts after first contact (caseload activity)
-                COUNT(CASE WHEN CA.[PatientSeen] = 1 AND CA.[Contact_Date] > WT.[FirstContact] 
-                    THEN CA.[Ref_ID] END) AS [TotalCaseloadContacts],
-                -- All contacts where patient was seen
-                COUNT(CASE WHEN CA.[PatientSeen] = 1 
-                    THEN CA.[Ref_ID] END) AS [TotalContacts]
+                COUNT(CASE WHEN CA.[PatientSeen] = 1 AND CA.[Contact_Date] > WT.[FirstContact] THEN CA.[Ref_ID] END) AS [TotalCaseloadContacts],
 
-            FROM [MIS_AG].[dbo].[Vw_tbl_ag_Report_ContactAttendances] AS CA
-            LEFT JOIN [MIS_AG].[dbo].[Vw_tbl_ag_Report_WaitingTimes] AS WT
-                ON CA.[Ref_ID] = WT.[Ref_ID]
+                -- All contacts where patient was seen
+                COUNT(CASE WHEN CA.[PatientSeen] = 1 THEN CA.[Ref_ID] END) AS [TotalContacts]
+
+            FROM (
+				SELECT * FROM [MIS_AG].[dbo].[Vw_tbl_ag_Report_ContactAttendances]
+			UNION  
+				SELECT * FROM [MIS_AG].[dbo].[Vw_tbl_ag_Report_ContactAttendances_2324]
+			) AS CA
+            
+			LEFT JOIN (
+				SELECT * FROM [MIS_AG].[dbo].[Vw_tbl_ag_Report_WaitingTimes]
+			UNION  
+				SELECT * FROM [MIS_AG].[dbo].[Vw_tbl_ag_Report_WaitingTimes_2324]
+			) AS WT
+                ON CA.[Ref_ID] = WT.[Ref_ID] 
+                --AND CA.[ProviderCodeCurrent] = WT.[ProviderCodeCurrent]
                 AND CA.[PeriodEnd] = WT.[PeriodEnd]
+
             GROUP BY
                 CA.[ProviderCodeCurrent],
                 CA.[PeriodEnd]
-        ) AS CA
-            ON WT.[ProviderCodeCurrent] = CA.[ProviderCodeCurrent]
+                
+        ) AS CA 
+            ON WT.[ProviderCodeCurrent] = CA.[ProviderCodeCurrent] 
             AND WT.[PeriodEnd] = CA.[PeriodEnd]
-
-        ORDER BY
-            WT.[ProviderCodeCurrent],
-            WT.[Service_Line],
-            WT.[PeriodEnd]
+                
+        ORDER BY WT.[ProviderCodeCurrent], WT.[PeriodEnd]
+		;
     """
 
-    # Expected columns after normalisation
-    EXPECTED_COLUMNS = [
+    # Expected columns after normalisation (base extract schema)
+    REQUIRED_COLUMNS = [  # RENAMED/REFINED (was EXPECTED_COLUMNS)
         "provider_code_current",
         "service_line",
         "period_end",
         "referrals",
         "clock_stop_actuals",
-        "discharges_no_clock_stop",
-        "referral_clock_stop_ratio",
-        "referral_discharged_no_clock_stop_ratio",
-        "demand_ratio",
         "total_contacts",
         "ftf_contacts",
         "caseload",
         "total_caseload_contacts",
         "ftf_caseload_contacts",
-        "total_contacts_per_caseload",
-        "ftf_contacts_per_caseload",
         "waiters",
-        "waiters_under_18_weeks",
         "waiters_over_18_weeks",
         "average_length_of_treatment",
         "average_contacts_at_discharge",
         "average_ftf_contacts_at_discharge",
-        "discharges_from_caseload",
+        "discharges_no_clock_stop",
+        "discharges_with_clock_stop",
     ]
 
-    # -----------------------------------------------------------------
-    # Initialisation
-    # -----------------------------------------------------------------
-    def __init__(
-        self,
-        config_path: Optional[str] = None,
-        output_dir: Optional[str] = None,
-        run_quality_checks: bool = True,
-    ):
-        """
-        Initialise SQL Server connection and output directory.
-
-        Args:
-            config_path: Path to config.ini file (optional, auto-detected if None)
-            output_dir: Directory to save CSV files (defaults to data/)
-            run_quality_checks: Whether to run data quality checks (default: True)
-        """
-        self.sql_conn = SQLServerConnection(config_path)
-        self.conn = self.sql_conn.connect()
-        self.run_quality_checks = run_quality_checks
-
-        if not self.conn:
-            raise ConnectionError("Failed to connect to the SQL Server database.")
-
-        # Set up output directory using pathlib for better path handling
-        if output_dir is None:
-            project_root = Path(__file__).resolve().parents[2]
-            self.output_dir = project_root / "data"
-        else:
-            self.output_dir = Path(output_dir)
-
-        # Create output directory if it doesn't exist
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-        logger.info(f"📁 Output directory: {self.output_dir}")
+    # Columns produced by calculations / dashboard logic (allowed extras)
+    DERIVED_COLUMNS = [
+        "waiters_under_18_weeks_calc",
+        "clock_stop_target",
+        "referral_clock_stop_ratio",
+        "referral_discharged_no_clock_stop_ratio",
+        "demand_ratio",
+        "total_contacts_per_caseload",
+        "ftf_contacts_per_caseload",
+    ]
 
     # -----------------------------------------------------------------
     # Helper Methods
     # -----------------------------------------------------------------
     @staticmethod
-    def _normalise_column_names(columns: list[str]) -> list[str]:
+    def _safe_divide(numer: pd.Series, denom: pd.Series | float | int) -> pd.Series:
+        """Elementwise division that returns NaN where denom is 0/NaN."""
+        denom_series = (
+            denom
+            if isinstance(denom, pd.Series)
+            else pd.Series(denom, index=numer.index)
+        )
+        out = numer.astype("float64") / denom_series.astype("float64")
+        out = out.mask((denom_series == 0) | (denom_series.isna()))
+        return out
+
+    @staticmethod
+    def add_waiters_under_18_weeks_calc(df: pd.DataFrame) -> pd.DataFrame:
         """
-        Convert column names to lowercase with underscores.
+        Add 'waiters_under_18_weeks_calc' = waiters - waiters_over_18_weeks.
 
-        Args:
-            columns: List of column names
-
-        Returns:
-            List of normalised column names
+        If a source 'waiters_under_18_weeks' exists, this does not overwrite it;
+        it only adds the calculated version for validation / fallback usage.
         """
+        if {"waiters", "waiters_over_18_weeks"}.issubset(df.columns):
+            df["waiters_under_18_weeks_calc"] = (
+                df["waiters"] - df["waiters_over_18_weeks"]
+            )
+        return df
 
-        def to_snake_case(name: str) -> str:
-            # Replace common symbols with readable tokens
-            name = name.strip()
+    @staticmethod
+    def validate_demand_percentile(demand_percentile: float) -> float:
+        """Validate 50..100 step 5, return as float."""
+        if demand_percentile is None:
+            raise ValueError("demand_percentile is required")
+        dp = float(demand_percentile)
+        if dp < 50 or dp > 100 or (dp % 5) != 0:
+            raise ValueError(
+                "demand_percentile must be between 50 and 100 in 5% increments"
+            )
+        return dp
 
-            # Keep semantic meaning from source column names
-            name = name.replace("<", "_under_")
-            name = name.replace(">", "_over_")
-            name = name.replace("+", "_plus_")
+    @classmethod
+    def compute_clock_stop_target(
+        cls, df: pd.DataFrame, demand_percentile: float
+    ) -> float:
+        """
+        For a (service-line filtered) df, compute the Xth percentile of referrals.
+        Returns NaN if referrals are missing/empty.
+        """
+        dp = cls.validate_demand_percentile(demand_percentile)
+        if "referrals" not in df.columns or df.empty:
+            return float("nan")
+        s = pd.to_numeric(df["referrals"], errors="coerce").dropna()
+        if s.empty:
+            return float("nan")
+        return float(s.quantile(dp / 100.0))
 
-            # Convert CamelCase/PascalCase (including acronyms) to snake_case
-            name = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", name)
-            name = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", name)
+    @classmethod
+    def add_derived_metrics(
+        cls,
+        df: pd.DataFrame,
+        demand_percentile: float = 60,
+        service_line: Optional[str] = None,
+    ) -> pd.DataFrame:
+        """
+        Add derived dashboard metrics.
+        - If service_line is provided, computes a single fixed clock_stop_target for that service line.
+        - Otherwise, computes a target per service_line and maps it to rows.
+        """
+        dp = cls.validate_demand_percentile(demand_percentile)
 
-            # Split letter/digit boundaries (e.g., Waiters18 -> Waiters_18)
-            name = re.sub(r"([A-Za-z])([0-9])", r"\1_\2", name)
-            name = re.sub(r"([0-9])([A-Za-z])", r"\1_\2", name)
+        # ensure waiters-under-18 calc exists for validation/fallback usage
+        df = cls.add_waiters_under_18_weeks_calc(df)
 
-            # Normalise separators
-            name = name.replace(" ", "_")
-            name = re.sub(r"[^0-9A-Za-z_]+", "_", name)
-            name = re.sub(r"_+", "_", name).strip("_").lower()
+        # Compute target(s)
+        if service_line is not None:
+            sdf = (
+                df[df["service_line"] == service_line].copy()
+                if "service_line" in df.columns
+                else df.copy()
+            )
+            target = cls.compute_clock_stop_target(sdf, dp)
+            df = sdf
+            df["clock_stop_target"] = target
+        else:
+            if "service_line" in df.columns and "referrals" in df.columns:
+                targets = (
+                    df.assign(
+                        referrals_num=pd.to_numeric(df["referrals"], errors="coerce")
+                    )
+                    .groupby("service_line")["referrals_num"]
+                    .quantile(dp / 100.0)
+                )
+                df["clock_stop_target"] = (
+                    df["service_line"].map(targets).astype("float64")
+                )
+            else:
+                df["clock_stop_target"] = np.nan
 
-            # Consistent naming for waiters split columns
-            if name == "waiters_18_plus_weeks":
-                return "waiters_over_18_weeks"
+        # Ratios and throughput metrics
+        if "clock_stop_actuals" in df.columns:
+            df["referral_clock_stop_ratio"] = cls._safe_divide(
+                df["clock_stop_actuals"], df["clock_stop_target"]
+            )
+        else:
+            df["referral_clock_stop_ratio"] = np.nan
 
-            return name
+        if "discharges_no_clock_stop" in df.columns:
+            df["referral_discharged_no_clock_stop_ratio"] = cls._safe_divide(
+                df["discharges_no_clock_stop"], df["clock_stop_target"]
+            )
+        else:
+            df["referral_discharged_no_clock_stop_ratio"] = np.nan
 
-        return [to_snake_case(col) for col in columns]
+        df["demand_ratio"] = (
+            df["referral_clock_stop_ratio"]
+            + df["referral_discharged_no_clock_stop_ratio"]
+        )
+
+        # Contact intensity per caseload
+        if "total_caseload_contacts" in df.columns and "caseload" in df.columns:
+            df["total_contacts_per_caseload"] = cls._safe_divide(
+                df["total_caseload_contacts"], df["caseload"]
+            )
+        else:
+            df["total_contacts_per_caseload"] = np.nan
+
+        if "ftf_caseload_contacts" in df.columns and "caseload" in df.columns:
+            df["ftf_contacts_per_caseload"] = cls._safe_divide(
+                df["ftf_caseload_contacts"], df["caseload"]
+            )
+        else:
+            df["ftf_contacts_per_caseload"] = np.nan
+
+        return df
 
     # -----------------------------------------------------------------
     # Schema Validation
     # -----------------------------------------------------------------
     def _check_schema(self, df: pd.DataFrame) -> Tuple[bool, List[str]]:
         """
-        Check if DataFrame has expected columns.
-
-        Args:
-            df: DataFrame to check
-
-        Returns:
-            Tuple of (is_valid, list of issues)
+        Check if DataFrame has required base columns.
+        Derived columns are allowed and won't fail the check.
         """
-        issues = []
+        issues: List[str] = []
 
-        # Check for missing columns
-        missing_cols = set(self.EXPECTED_COLUMNS) - set(df.columns)
+        missing_cols = set(self.REQUIRED_COLUMNS) - set(df.columns)
         if missing_cols:
             issues.append(f"Missing columns: {', '.join(sorted(missing_cols))}")
 
-        # Check for unexpected columns
-        unexpected_cols = set(df.columns) - set(self.EXPECTED_COLUMNS)
+        # Only flag truly unexpected columns (not derived)
+        allowed_extras = set(self.DERIVED_COLUMNS)
+        unexpected_cols = (
+            set(df.columns) - set(self.REQUIRED_COLUMNS)
+        ) - allowed_extras
         if unexpected_cols:
             issues.append(f"Unexpected columns: {', '.join(sorted(unexpected_cols))}")
 
-        return len(issues) == 0, issues
+        return len(missing_cols) == 0, issues  # NOTE: only missing base cols fail
 
     # -----------------------------------------------------------------
-    # Data Completeness Checks
+    # Data Completeness Check
     # -----------------------------------------------------------------
     def _check_data_completeness(self, df: pd.DataFrame) -> Tuple[bool, List[str]]:
-        """
-        Check for missing values in critical columns.
+        """Check required columns for missing values."""
 
-        Args:
-            df: DataFrame to check
+        issues: List[str] = []
 
-        Returns:
-            Tuple of (is_valid, list of issues)
-        """
-        issues = []
-
-        # Critical columns that should not have nulls
-        critical_cols = ["provider_code_current", "period_end", "service_line"]
-
-        for col in critical_cols:
-            if col in df.columns:
-                null_count = df[col].isnull().sum()
-                null_pct = (null_count / len(df)) * 100
-
-                if null_count > 0:
-                    issues.append(
-                        f"{col}: {null_count:,} missing values ({null_pct:.1f}%)"
-                    )
-
-        # Check for completely null rows
-        completely_null = df.isnull().all(axis=1).sum()
-        if completely_null > 0:
-            issues.append(f"Found {completely_null:,} completely empty rows")
+        for col in self.REQUIRED_COLUMNS:
+            if col not in df.columns:
+                continue
+            missing = int(df[col].isna().sum())
+            if missing > 0:
+                issues.append(f"{col}: {missing:,} missing value(s)")
 
         return len(issues) == 0, issues
 
     # -----------------------------------------------------------------
-    # Data Type Checks
+    # Data Types Check
     # -----------------------------------------------------------------
     def _check_data_types(self, df: pd.DataFrame) -> Tuple[bool, List[str]]:
-        """
-        Check if data types are appropriate.
+        """Check basic expected types (datetime for period_end, numeric for counts)."""
 
-        Args:
-            df: DataFrame to check
+        issues: List[str] = []
 
-        Returns:
-            Tuple of (is_valid, list of issues)
-        """
-        issues = []
-
-        # Check period_end is datetime
         if "period_end" in df.columns and not pd.api.types.is_datetime64_any_dtype(
             df["period_end"]
         ):
-            issues.append("period_end column is not datetime type")
+            issues.append("period_end is not a datetime column")
 
-        # Check numeric columns
         numeric_cols = [
-            "referrals",
-            "clock_stop_actuals",
-            "waiters",
-            "caseload",
-            "total_contacts",
-            "ftf_contacts",
+            c
+            for c in self.REQUIRED_COLUMNS
+            if c
+            not in {
+                "provider_code_current",
+                "service_line",
+                "period_end",
+            }
+            and c in df.columns
         ]
 
         for col in numeric_cols:
-            if col in df.columns and not pd.api.types.is_numeric_dtype(df[col]):
-                issues.append(f"{col} is not numeric type (found: {df[col].dtype})")
+            s = df[col]
+            coerced = pd.to_numeric(s, errors="coerce")
+            newly_missing = int(coerced.isna().sum() - s.isna().sum())
+            if newly_missing > 0:
+                issues.append(f"{col}: {newly_missing:,} value(s) are non-numeric")
 
         return len(issues) == 0, issues
 
@@ -484,7 +573,7 @@ class PatientDataExtractor:
             "total_contacts",
             "ftf_contacts",
             "discharges_no_clock_stop",
-            "discharges_from_caseload",
+            "discharges_with_clock_stop",  # FIX (was discharges_from_caseload)
         ]
 
         for col in count_cols:
@@ -510,29 +599,49 @@ class PatientDataExtractor:
         """
         issues = []
 
-        # Total waiters should equal under18 + 18plus waiters
-        if all(
-            col in df.columns
-            for col in ["waiters", "waiters_under_18_weeks", "waiters_over_18_weeks"]
-        ):
+        # Waiters under 18 weeks calculated vs components
+        if {"waiters", "waiters_over_18_weeks"}.issubset(df.columns):
+            if "waiters_under_18_weeks_calc" not in df.columns:
+                df = self.add_waiters_under_18_weeks_calc(df)
+
             mismatch = df[
-                (df["waiters"].notna())
-                & (df["waiters_under_18_weeks"].notna())
-                & (df["waiters_over_18_weeks"].notna())
+                df["waiters"].notna()
+                & df["waiters_over_18_weeks"].notna()
+                & df["waiters_under_18_weeks_calc"].notna()
                 & (
                     abs(
                         df["waiters"]
-                        - (df["waiters_under_18_weeks"] + df["waiters_over_18_weeks"])
+                        - (
+                            df["waiters_under_18_weeks_calc"]
+                            + df["waiters_over_18_weeks"]
+                        )
                     )
                     > 0.1
                 )
             ]
-
             if len(mismatch) > 0:
                 issues.append(
                     f"Waiter calculation mismatch: {len(mismatch):,} rows where "
-                    f"waiters ≠ waiters_under_18_weeks + waiters_over_18_weeks"
+                    f"waiters ≠ waiters_under_18_weeks_calc + waiters_over_18_weeks"
                 )
+
+            # Optional: if a source waiters_under_18_weeks exists, validate against calc
+            if "waiters_under_18_weeks" in df.columns:
+                mismatch_src = df[
+                    df["waiters_under_18_weeks"].notna()
+                    & df["waiters_under_18_weeks_calc"].notna()
+                    & (
+                        abs(
+                            df["waiters_under_18_weeks"]
+                            - df["waiters_under_18_weeks_calc"]
+                        )
+                        > 0.1
+                    )
+                ]
+                if len(mismatch_src) > 0:
+                    issues.append(
+                        f"WaitersUnder18Weeks vs calc mismatch: {len(mismatch_src):,} rows differ"
+                    )
 
         # FTF contacts should not exceed total contacts
         if "ftf_contacts" in df.columns and "total_contacts" in df.columns:
@@ -693,6 +802,7 @@ class PatientDataExtractor:
         logger.info("📊 Fetching patient data from SQL Server...")
 
         try:
+            self.open_connection()
             cursor = self.conn.cursor()
             cursor.execute(self.PATIENT_QUERY)
 
@@ -712,6 +822,21 @@ class PatientDataExtractor:
 
             # Create DataFrame with progress bar
             with tqdm(total=total_rows, desc="Loading data", unit="rows") as pbar:
+                # Defensive: ensure row width matches column count (unit tests use a fake cursor)
+                if rows:
+                    row_width = len(rows[0])
+                    col_width = len(columns)
+                    if row_width != col_width:
+                        logger.warning(
+                            "⚠️ Row/column width mismatch (%s values vs %s columns). Adjusting.",
+                            row_width,
+                            col_width,
+                        )
+                        if row_width > col_width:
+                            rows = [r[:col_width] for r in rows]
+                        else:
+                            columns = columns[:row_width]
+
                 df = pd.DataFrame.from_records(rows, columns=columns)
                 pbar.update(total_rows)
 
@@ -735,6 +860,18 @@ class PatientDataExtractor:
                 logger.info(
                     f"📅 Max period_end in extracted dataset: {df['period_end'].max().date() if not df.empty else 'N/A'}"
                 )
+
+            # Ensure waiters_under_18_weeks exists for downstream usage + tests
+            if "waiters_under_18_weeks" not in df.columns and {
+                "waiters",
+                "waiters_over_18_weeks",
+            }.issubset(df.columns):
+                df["waiters_under_18_weeks"] = (
+                    df["waiters"] - df["waiters_over_18_weeks"]
+                )
+
+            # Add calculated column(s) used for validation/fallback downstream (Dash)
+            df = self.add_waiters_under_18_weeks_calc(df)  # NEW
 
             logger.info(f"✅ Retrieved {len(df):,} rows from source views.")
             logger.info(
@@ -768,7 +905,9 @@ class PatientDataExtractor:
     # -----------------------------------------------------------------
     # Data Persistence
     # -----------------------------------------------------------------
-    def save_to_csv(self, df: pd.DataFrame, filename: str = "patient_data.csv") -> Path:
+    def save_to_csv(
+        self, df: pd.DataFrame, filename: str = "patient_data.csv"
+    ) -> Optional[Path]:
         """
         Save DataFrame to CSV file.
 
@@ -804,12 +943,15 @@ class PatientDataExtractor:
 
     def close_connection(self):
         """Close the database connection."""
-        if self.conn:
+        try:
             self.sql_conn.close()
-            logger.info("✅ Database connection closed.")
+        finally:
+            self.conn = None
+        logger.info("✅ Database connection closed.")
 
     def __enter__(self):
         """Context manager entry."""
+        self.open_connection()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):

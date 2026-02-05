@@ -6,7 +6,8 @@ Handles loading, preprocessing, and providing data for the Dash application.
 
 import logging
 from pathlib import Path
-from typing import Optional, Tuple, Dict, List
+from typing import Optional, Tuple, Dict, List, Any
+import re
 import pandas as pd
 import numpy as np
 
@@ -21,6 +22,13 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------
 class DataHandler:
     """Manages data loading and preprocessing for the dashboard."""
+
+    _CSV_ENCODING_FALLBACKS: Tuple[str, ...] = (
+        "utf-8",
+        "utf-8-sig",
+        "cp1252",
+        "latin1",
+    )
 
     def __init__(self, data_dir: Optional[Path] = None):
         """
@@ -65,12 +73,54 @@ class DataHandler:
 
         logger.info(f"📂 Loading patient data from: {filepath}")
 
-        # Patient ingestion outputs snake_case columns
-        self.patient_df = pd.read_csv(filepath, parse_dates=["period_end"])
+        self.patient_df = self._read_csv_with_fallback(filepath)
+        self.patient_df = self._standardise_patient_columns(self.patient_df)
+
+        if "period_end" not in self.patient_df.columns:
+            raise ValueError(
+                "Patient data is missing required date column 'period_end' "
+                "(after standardising headers)."
+            )
+
+        # Parse dates after standardising column names
+        self.patient_df["period_end"] = pd.to_datetime(
+            self.patient_df["period_end"],
+            errors="coerce",
+            dayfirst=True,
+        )
 
         logger.info(f"✅ Loaded {len(self.patient_df):,} patient records")
 
         return self.patient_df
+
+    @staticmethod
+    def _to_snake_case(column_name: str) -> str:
+        """Convert column names like 'ProviderCodeCurrent' or 'Service_Line' to snake_case."""
+        name = str(column_name).strip()
+        name = re.sub(r"[^0-9A-Za-z]+", "_", name)
+        name = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", name)
+        name = re.sub(r"_+", "_", name)
+        return name.strip("_").lower()
+
+    def _standardise_patient_columns(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Standardise patient data columns to match dashboard expectations.
+
+        The dashboard expects snake_case columns (e.g., provider_code_current, service_line,
+        period_end). Some source extracts use CamelCase (e.g., ProviderCodeCurrent).
+        """
+
+        original_cols = list(df.columns)
+        rename_map = {c: self._to_snake_case(c) for c in original_cols}
+        standardised = df.rename(columns=rename_map)
+
+        # Log a short mapping if any changes occurred
+        if any(k != v for k, v in rename_map.items()):
+            logger.info(
+                "🧾 Standardised patient columns (example): %s",
+                ", ".join([f"{k}->{v}" for k, v in list(rename_map.items())[:5]]),
+            )
+
+        return standardised
 
     def load_staffing_data(self, filename: str = "staffing_data.csv") -> pd.DataFrame:
         """
@@ -92,11 +142,50 @@ class DataHandler:
 
         logger.info(f"📂 Loading staffing data from: {filepath}")
 
-        self.staffing_df = pd.read_csv(filepath)
+        self.staffing_df = self._read_csv_with_fallback(filepath)
 
         logger.info(f"✅ Loaded {len(self.staffing_df):,} staffing records")
 
         return self.staffing_df
+
+    def _read_csv_with_fallback(
+        self,
+        filepath: Path,
+        **read_csv_kwargs: Any,
+    ) -> pd.DataFrame:
+        """Read a CSV file using a small encoding fallback chain.
+
+        This handles a common Windows case where CSVs contain cp1252 characters
+        (e.g., smart quotes) that fail under UTF-8.
+        """
+
+        last_error: Optional[Exception] = None
+        for encoding in self._CSV_ENCODING_FALLBACKS:
+            try:
+                return pd.read_csv(filepath, encoding=encoding, **read_csv_kwargs)
+            except UnicodeDecodeError as e:
+                last_error = e
+                logger.warning(
+                    "⚠️ Failed to decode %s with %s; retrying... (%s)",
+                    filepath.name,
+                    encoding,
+                    e,
+                )
+
+        # Final fallback: decode with replacement so the dashboard can still run.
+        # This should be rare, but avoids a hard crash on unexpected encodings.
+        logger.warning(
+            "⚠️ Falling back to utf-8 with replacement characters for %s",
+            filepath.name,
+        )
+        try:
+            with open(
+                filepath, mode="r", encoding="utf-8", errors="replace", newline=""
+            ) as f:
+                return pd.read_csv(f, **read_csv_kwargs)
+        except Exception as e:
+            # Preserve original decoding error context where possible.
+            raise e from last_error
 
     def load_all_data(self) -> Tuple[pd.DataFrame, pd.DataFrame]:
         """

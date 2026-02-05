@@ -605,7 +605,7 @@ def _overview_key_metrics_figure(
                 "referrals": "sum",
                 "waiters": "sum",
                 "caseload": "sum",
-                "discharges_from_caseload": "sum",
+                "discharges_with_clock_stop": "sum",
                 "total_contacts": "sum",
                 "clock_stop_actuals": "sum",
             }
@@ -628,7 +628,7 @@ def _overview_key_metrics_figure(
         ("Waiters", "waiters"),
         ("Caseload", "caseload"),
         ("Contacts", "total_contacts"),
-        ("Discharges", "discharges_from_caseload"),
+        ("Discharges", "discharges_with_clock_stop"),
         ("Clock Stop Actuals", "clock_stop_actuals"),
     ]
 
@@ -1046,7 +1046,7 @@ def update_summary_stats(data_json):
     total_waiters = int(df["waiters"].sum())
     total_caseload = int(df["caseload"].sum())
     total_contacts = int(df["total_contacts"].sum())
-    total_discharges = int(df["discharges_from_caseload"].sum())
+    total_discharges = int(df["discharges_with_clock_stop"].sum())
 
     return dbc.Row(
         [
@@ -1491,7 +1491,7 @@ def update_discharges_timeseries(data_json, forecast_on):
     df["period_end"] = pd.to_datetime(df["period_end"])
     return _metric_timeseries_figure(
         df=df,
-        metric="discharges_from_caseload",
+        metric="discharges_with_clock_stop",
         label="Discharges",
         color="#FFA15A",
         forecast_on=bool(forecast_on),
