@@ -231,7 +231,38 @@ def create_filter_section():
     else:
         service_line_options = []
 
-    min_date, max_date = data_handler.get_date_range()
+    # Build a month-level slider index from patient period_end.
+    if (
+        data_handler.patient_df is not None
+        and "period_end" in data_handler.patient_df.columns
+    ):
+        period_end = pd.to_datetime(
+            data_handler.patient_df["period_end"], errors="coerce"
+        )
+        month_ends = (
+            period_end.dropna()
+            .dt.to_period("M")
+            .dt.to_timestamp("M")
+            .drop_duplicates()
+            .sort_values()
+        )
+        slider_dates = [d.strftime("%Y-%m-%d") for d in month_ends.tolist()]
+    else:
+        slider_dates = []
+
+    # Default range: from the first available month to the latest month
+    default_start_idx = 0
+    default_end_idx = max(0, len(slider_dates) - 1)
+
+    # Slider marks (keep it readable): show April each year + endpoints
+    marks: dict[int, str] = {}
+    if slider_dates:
+        dt = pd.to_datetime(pd.Series(slider_dates), errors="coerce")
+        for idx, d in enumerate(dt.tolist()):
+            if d is None or pd.isna(d):
+                continue
+            if idx in {0, default_end_idx} or d.month == 4:
+                marks[idx] = d.strftime("%b %Y")
 
     return dbc.Row(
         [
@@ -244,11 +275,30 @@ def create_filter_section():
                                 width="auto",
                             ),
                             dbc.Col(
-                                dcc.DatePickerRange(
-                                    id="date-range-picker",
-                                    start_date=min_date,
-                                    end_date=max_date,
-                                    display_format="YYYY-MM-DD",
+                                html.Div(
+                                    [
+                                        dcc.Store(
+                                            id="date-slider-dates",
+                                            data=slider_dates,
+                                        ),
+                                        html.Div(
+                                            id="date-range-slider-label",
+                                            className="text-muted small mb-1",
+                                        ),
+                                        dcc.RangeSlider(
+                                            id="date-range-slider",
+                                            min=0,
+                                            max=max(0, len(slider_dates) - 1),
+                                            step=1,
+                                            value=[default_start_idx, default_end_idx],
+                                            marks=marks,
+                                            allowCross=False,
+                                            tooltip={
+                                                "placement": "bottom",
+                                                "always_visible": False,
+                                            },
+                                        ),
+                                    ]
                                 ),
                                 width=True,
                             ),
@@ -978,12 +1028,12 @@ app.layout = dbc.Container(
     Output("filtered-data-store", "data"),
     [Input("apply-filters-btn", "n_clicks")],
     [
-        State("date-range-picker", "start_date"),
-        State("date-range-picker", "end_date"),
+        State("date-range-slider", "value"),
+        State("date-slider-dates", "data"),
         State("service-line-dropdown", "value"),
     ],
 )
-def filter_data(n_clicks, start_date, end_date, service_lines):
+def filter_data(n_clicks, slider_range, slider_dates, service_lines):
     """Filter patient data based on the UI controls.
 
     Args:
@@ -1002,9 +1052,24 @@ def filter_data(n_clicks, start_date, end_date, service_lines):
 
     df = data_handler.patient_df.copy()
 
-    # Apply filters
-    if start_date and end_date:
-        df = data_handler.filter_by_date_range(df, start_date, end_date)
+    # Apply date filter from slider indices
+    if (
+        slider_dates
+        and isinstance(slider_range, (list, tuple))
+        and len(slider_range) == 2
+    ):
+        try:
+            start_idx = int(slider_range[0])
+            end_idx = int(slider_range[1])
+            start_idx = max(0, min(start_idx, len(slider_dates) - 1))
+            end_idx = max(0, min(end_idx, len(slider_dates) - 1))
+            if start_idx > end_idx:
+                start_idx, end_idx = end_idx, start_idx
+            start_date = slider_dates[start_idx]
+            end_date = slider_dates[end_idx]
+            df = data_handler.filter_by_date_range(df, start_date, end_date)
+        except Exception:
+            pass
 
     if service_lines:
         # Users select service labels, but we filter by provider code only.
@@ -1013,6 +1078,34 @@ def filter_data(n_clicks, start_date, end_date, service_lines):
 
     # Store as JSON
     return df.to_json(date_format="iso", orient="split")
+
+
+@app.callback(
+    Output("date-range-slider-label", "children"),
+    [Input("date-range-slider", "value")],
+    [State("date-slider-dates", "data")],
+)
+def update_date_slider_label(slider_range, slider_dates):
+    if (
+        not slider_dates
+        or not isinstance(slider_range, (list, tuple))
+        or len(slider_range) != 2
+    ):
+        return "Date range: N/A"
+    try:
+        start_idx = int(slider_range[0])
+        end_idx = int(slider_range[1])
+        start_idx = max(0, min(start_idx, len(slider_dates) - 1))
+        end_idx = max(0, min(end_idx, len(slider_dates) - 1))
+        if start_idx > end_idx:
+            start_idx, end_idx = end_idx, start_idx
+        start_dt = pd.to_datetime(slider_dates[start_idx], errors="coerce")
+        end_dt = pd.to_datetime(slider_dates[end_idx], errors="coerce")
+        if pd.isna(start_dt) or pd.isna(end_dt):
+            return "Date range: N/A"
+        return f"Date range: {start_dt.strftime('%b %Y')} to {end_dt.strftime('%b %Y')}"
+    except Exception:
+        return "Date range: N/A"
 
 
 @app.callback(
@@ -1296,6 +1389,10 @@ def create_overview_tab(df):
                     html.P(
                         "Use the filters above to change the view. In charts, you can click legend items to show/hide metrics. "
                         "Forecast toggles apply per chart (Overview and Demand Analysis)."
+                    ),
+                    html.P(
+                        "Forecasting note: ETS / exponential smoothing (Holt-Winters) works best with enough history to learn seasonality. "
+                        "For monthly data, adjust the date selector to 2-3 years (~24-36 points) when forecasting."
                     ),
                 ],
                 color="info",
@@ -2033,6 +2130,10 @@ def create_demand_tab(df):
                     html.H4("👥 Demand Analysis", className="alert-heading"),
                     html.P(
                         "Use the filters above to change the view. Each chart has its own forecast toggle (ETS with 95% CI)."
+                    ),
+                    html.P(
+                        "Forecasting note: ETS / exponential smoothing (Holt-Winters) works best with enough history to learn seasonality. "
+                        "For monthly data, adjust the date selector to 2-3 years (~24-36 points) when forecasting."
                     ),
                 ],
                 color="info",
