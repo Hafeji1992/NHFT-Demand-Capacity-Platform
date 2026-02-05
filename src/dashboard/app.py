@@ -1979,6 +1979,54 @@ def _capacity_staff_mix_by_group_figure(staffing_filtered: pd.DataFrame) -> go.F
     return _capacity_style_figure(fig)
 
 
+def _capacity_staff_by_service_line_figure(
+    staffing_filtered: pd.DataFrame,
+) -> go.Figure:
+    if staffing_filtered is None or staffing_filtered.empty:
+        fig = go.Figure()
+        fig.update_layout(
+            title=dict(text="Total Staff by Service Line", x=0.5, xanchor="center"),
+            template="plotly_white",
+            height=420,
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+        )
+        return fig
+
+    if "service_line" not in staffing_filtered.columns:
+        fig = go.Figure()
+        fig.update_layout(
+            title=dict(text="Total Staff by Service Line", x=0.5, xanchor="center"),
+            template="plotly_white",
+            height=420,
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+        )
+        return fig
+
+    by_service_line = (
+        staffing_filtered.groupby("service_line", as_index=False)
+        .agg(staff=("staff", "sum"))
+        .sort_values("staff", ascending=True)
+    )
+
+    n_lines = int(by_service_line.shape[0])
+    fig_height = max(450, min(2400, 26 * n_lines + 200))
+
+    fig = px.bar(
+        by_service_line,
+        x="staff",
+        y="service_line",
+        orientation="h",
+        title="Total Staff by Service Line",
+        labels={"staff": "Staff (count)", "service_line": "Service line"},
+        height=fig_height,
+    )
+    fig.update_traces(hovertemplate="%{y}<br>Staff: %{x:,}<extra></extra>")
+    fig.update_xaxes(showgrid=False)
+    return _capacity_style_figure(fig)
+
+
 def _capacity_staff_vs_caseload_latest_figure(
     patient_df: pd.DataFrame,
     staffing_filtered: pd.DataFrame,
@@ -2242,6 +2290,7 @@ def create_capacity_tab(df):
     capacity_graphs = []
     if staffing_filtered is not None and staffing_error is None:
         fig_by_group = _capacity_staff_mix_by_group_figure(staffing_filtered)
+        fig_by_service_line = _capacity_staff_by_service_line_figure(staffing_filtered)
         fig_staff_vs_case = _capacity_staff_vs_caseload_latest_figure(
             df, staffing_filtered
         )
@@ -2263,6 +2312,37 @@ def create_capacity_tab(df):
                             "Staff by Group",
                             fig_by_group,
                             "capacity-staff-by-group",
+                        ),
+                        width=12,
+                    ),
+                ]
+            )
+        )
+
+        capacity_graphs.append(
+            dbc.Row(
+                [
+                    dbc.Col(
+                        dbc.Card(
+                            [
+                                dbc.CardHeader(
+                                    html.H5("Staff by Service Line", className="mb-0")
+                                ),
+                                dbc.CardBody(
+                                    html.Div(
+                                        dcc.Graph(
+                                            id="capacity-staff-by-service-line",
+                                            figure=fig_by_service_line,
+                                        ),
+                                        style={
+                                            "height": "560px",
+                                            "overflowY": "auto",
+                                        },
+                                    ),
+                                    className="p-2",
+                                ),
+                            ],
+                            className="mb-4 shadow-sm",
                         ),
                         width=12,
                     ),
