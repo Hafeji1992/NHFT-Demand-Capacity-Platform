@@ -1048,6 +1048,22 @@ def update_summary_stats(data_json):
     total_contacts = int(df["total_contacts"].sum())
     total_discharges = int(df["discharges_with_clock_stop"].sum())
 
+    # Capacity metric (staff is not time-indexed in the current dataset)
+    total_staff_value: Optional[int] = None
+    if data_handler is not None and data_handler.staffing_df is not None:
+        staffing_filtered, staffing_error = _capacity_filter_staffing(
+            df, data_handler.staffing_df
+        )
+        if staffing_filtered is not None and staffing_error is None:
+            try:
+                total_staff_value = int(round(float(staffing_filtered["staff"].sum())))
+            except Exception:
+                total_staff_value = None
+
+    total_staff_display = (
+        f"{total_staff_value:,}" if total_staff_value is not None else "N/A"
+    )
+
     return dbc.Row(
         [
             dbc.Col(
@@ -1071,6 +1087,15 @@ def update_summary_stats(data_json):
             dbc.Col(
                 create_metric_card(
                     "Discharges", f"{total_discharges:,}", "✅", "secondary"
+                ),
+                width=2,
+            ),
+            dbc.Col(
+                create_metric_card(
+                    "Total Staff",
+                    total_staff_display,
+                    "🧑‍⚕️",
+                    "dark",
                 ),
                 width=2,
             ),
@@ -1297,14 +1322,49 @@ def create_overview_tab(df):
     )
 
     # -----------------------------
+    # Capacity: Staff vs Caseload (latest)
+    # -----------------------------
+    staff_vs_caseload_card = None
+    if data_handler is not None:
+        staffing_filtered, staffing_error = _capacity_filter_staffing(
+            df, data_handler.staffing_df
+        )
+        if staffing_filtered is not None and staffing_error is None:
+            fig_staff_vs_case = _capacity_staff_vs_caseload_latest_figure(
+                df, staffing_filtered
+            )
+            if fig_staff_vs_case is not None:
+                staff_vs_caseload_card = dbc.Card(
+                    [
+                        dbc.CardHeader(
+                            html.H5("Staff vs Caseload (Latest)", className="mb-0")
+                        ),
+                        dbc.CardBody(
+                            dcc.Graph(
+                                id="overview-staff-vs-caseload",
+                                figure=fig_staff_vs_case,
+                            ),
+                            className="p-2",
+                        ),
+                    ],
+                    className="mb-4 shadow-sm",
+                )
+
+    # -----------------------------
     # Layout
     # -----------------------------
     return html.Div(
         [
             dbc.Alert(
-                "Tip: use the legend to show/hide metrics. Forecast toggles are per-chart (Overview + Demand Analysis).",
-                color="secondary",
-                className="mt-3",
+                [
+                    html.H4("📈 Overview", className="alert-heading"),
+                    html.P(
+                        "Use the filters above to change the view. In charts, you can click legend items to show/hide metrics. "
+                        "Forecast toggles apply per chart (Overview and Demand Analysis)."
+                    ),
+                ],
+                color="info",
+                className="mt-4",
             ),
             dcc.Store(
                 id="overview-keymetrics-visible-metrics",
@@ -1312,6 +1372,7 @@ def create_overview_tab(df):
             ),
             # Key metrics combined time-series (legend selectable)
             key_metrics_chart,
+            staff_vs_caseload_card,
             # Stacked 18-week bar chart
             waiters_chart,
         ]
@@ -1708,6 +1769,193 @@ def create_staffing_pivot_table(
     )
 
 
+def _capacity_filter_staffing(
+    patient_df: pd.DataFrame,
+    staffing_df: Optional[pd.DataFrame],
+) -> tuple[Optional[pd.DataFrame], Optional[html.Div]]:
+    """Filter staffing dataset to the providers currently selected in patient_df."""
+
+    if staffing_df is None or staffing_df.empty:
+        return None, html.Div(
+            "No staffing data available.",
+            className="alert alert-warning",
+        )
+
+    required_cols = {"provider_code_current", "service_line", "staff_group", "staff"}
+    if not required_cols.issubset(set(staffing_df.columns)):
+        missing = sorted(required_cols - set(staffing_df.columns))
+        return None, html.Div(
+            f"Staffing data is missing required columns: {', '.join(missing)}",
+            className="alert alert-danger",
+        )
+
+    selected_providers: list[str] = []
+    if (
+        patient_df is not None
+        and not patient_df.empty
+        and "provider_code_current" in patient_df.columns
+    ):
+        selected_providers = (
+            patient_df["provider_code_current"].dropna().astype(str).unique().tolist()
+        )
+
+    staffing_filtered = staffing_df.copy()
+    staffing_filtered["provider_code_current"] = staffing_filtered[
+        "provider_code_current"
+    ].astype(str)
+
+    if selected_providers:
+        staffing_filtered = staffing_filtered[
+            staffing_filtered["provider_code_current"].isin(
+                [str(p) for p in selected_providers]
+            )
+        ]
+
+    staffing_filtered["staff"] = pd.to_numeric(
+        staffing_filtered["staff"], errors="coerce"
+    ).fillna(0)
+
+    if staffing_filtered.empty:
+        return None, html.Div(
+            "No staffing rows match the selected provider(s).",
+            className="alert alert-info",
+        )
+
+    return staffing_filtered, None
+
+
+def _capacity_style_figure(fig: go.Figure) -> go.Figure:
+    """Apply a consistent, dashboard-friendly Plotly style."""
+    fig.update_layout(
+        margin=dict(l=40, r=40, t=60, b=40),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        legend=dict(
+            bgcolor="rgba(255,255,255,0.85)",
+            bordercolor="rgba(0,0,0,0.08)",
+            borderwidth=1,
+        ),
+    )
+    fig.update_yaxes(
+        tickformat=",",
+        showgrid=True,
+        gridcolor="rgba(0,0,0,0.08)",
+        zeroline=False,
+    )
+    return fig
+
+
+def _capacity_staff_mix_by_group_figure(staffing_filtered: pd.DataFrame) -> go.Figure:
+    by_group = (
+        staffing_filtered.groupby("staff_group", as_index=False)
+        .agg(staff=("staff", "sum"))
+        .sort_values("staff", ascending=True)
+    )
+    fig = px.bar(
+        by_group,
+        x="staff",
+        y="staff_group",
+        orientation="h",
+        title="Total Staff by Staff Group",
+        labels={"staff": "Staff (count)", "staff_group": "Staff group"},
+    )
+    fig.update_traces(hovertemplate="%{y}<br>Staff: %{x:,}<extra></extra>")
+    return _capacity_style_figure(fig)
+
+
+def _capacity_staff_vs_caseload_latest_figure(
+    patient_df: pd.DataFrame,
+    staffing_filtered: pd.DataFrame,
+) -> Optional[go.Figure]:
+    if patient_df is None or patient_df.empty or "caseload" not in patient_df.columns:
+        return None
+
+    required_patient_cols = {
+        "provider_code_current",
+        "service_line",
+        "period_end",
+        "caseload",
+    }
+    if not required_patient_cols.issubset(set(patient_df.columns)):
+        return None
+
+    df = patient_df.copy()
+    df["period_end"] = pd.to_datetime(df["period_end"], errors="coerce")
+    latest_period_end = df["period_end"].max()
+    if pd.isna(latest_period_end):
+        return None
+
+    latest = df[df["period_end"] == latest_period_end].copy()
+    latest["provider_code_current"] = latest["provider_code_current"].astype(str)
+
+    demand_latest = latest.groupby(
+        ["provider_code_current", "service_line"], as_index=False
+    ).agg(caseload=("caseload", "sum"))
+    demand_latest["caseload"] = pd.to_numeric(
+        demand_latest["caseload"], errors="coerce"
+    ).fillna(0)
+
+    staff_totals = staffing_filtered.groupby(
+        ["provider_code_current", "service_line"], as_index=False
+    ).agg(staff=("staff", "sum"))
+
+    merged = demand_latest.merge(
+        staff_totals,
+        on=["provider_code_current", "service_line"],
+        how="inner",
+    )
+
+    if merged.empty:
+        return None
+
+    merged["service_label"] = (
+        merged["provider_code_current"].astype(str)
+        + " - "
+        + merged["service_line"].astype(str)
+    )
+    merged["staff_per_100_caseload"] = merged.apply(
+        lambda r: (
+            (r["staff"] / r["caseload"] * 100) if float(r["caseload"]) > 0 else None
+        ),
+        axis=1,
+    )
+
+    # Keep a clean analytic frame for the trendline
+    plot_df = merged.copy()
+    plot_df["caseload"] = pd.to_numeric(plot_df["caseload"], errors="coerce")
+    plot_df["staff"] = pd.to_numeric(plot_df["staff"], errors="coerce")
+    plot_df = plot_df.dropna(subset=["caseload", "staff"])
+
+    fig = px.scatter(
+        plot_df,
+        x="caseload",
+        y="staff",
+        color="staff_per_100_caseload",
+        size="caseload",
+        size_max=40,
+        trendline="ols",
+        hover_name="service_label",
+        hover_data={
+            "caseload": ":,",
+            "staff": ":,",
+            "staff_per_100_caseload": ":.2f",
+            "service_label": False,
+        },
+        title=f"Staff vs Caseload (Latest period: {latest_period_end.strftime('%b %Y')})",
+        labels={
+            "caseload": "Caseload (latest)",
+            "staff": "Staff (total)",
+            "staff_per_100_caseload": "Staff per 100 caseload",
+        },
+    )
+    fig.update_traces(
+        marker=dict(opacity=0.75, line=dict(width=1, color="rgba(0,0,0,0.15)"))
+    )
+    fig.update_xaxes(showgrid=False, tickformat=",")
+    fig.update_yaxes(tickformat=",")
+    return _capacity_style_figure(fig)
+
+
 def create_demand_tab(df):
     """Create the Demand tab layout.
 
@@ -1749,6 +1997,16 @@ def create_demand_tab(df):
 
     return html.Div(
         [
+            dbc.Alert(
+                [
+                    html.H4("👥 Demand Analysis", className="alert-heading"),
+                    html.P(
+                        "Use the filters above to change the view. Each chart has its own forecast toggle (ETS with 95% CI)."
+                    ),
+                ],
+                color="info",
+                className="mt-4",
+            ),
             dbc.Row(
                 [
                     dbc.Col(
@@ -1827,7 +2085,58 @@ def create_capacity_tab(df):
     if data_handler is None:
         return html.Div("Data not available", className="alert alert-danger")
 
+    staffing_filtered, staffing_error = _capacity_filter_staffing(
+        df, data_handler.staffing_df
+    )
+
     staffing_table = create_staffing_pivot_table(df, data_handler.staffing_df)
+
+    capacity_graphs = []
+    if staffing_filtered is not None and staffing_error is None:
+        fig_by_group = _capacity_staff_mix_by_group_figure(staffing_filtered)
+        fig_staff_vs_case = _capacity_staff_vs_caseload_latest_figure(
+            df, staffing_filtered
+        )
+
+        def graph_card(title: str, fig: go.Figure, graph_id: str):
+            return dbc.Card(
+                [
+                    dbc.CardHeader(html.H5(title, className="mb-0")),
+                    dbc.CardBody(dcc.Graph(id=graph_id, figure=fig), className="p-2"),
+                ],
+                className="mb-4 shadow-sm",
+            )
+
+        capacity_graphs.append(
+            dbc.Row(
+                [
+                    dbc.Col(
+                        graph_card(
+                            "Staff by Group",
+                            fig_by_group,
+                            "capacity-staff-by-group",
+                        ),
+                        width=12,
+                    ),
+                ]
+            )
+        )
+
+        if fig_staff_vs_case is not None:
+            capacity_graphs.append(
+                dbc.Row(
+                    [
+                        dbc.Col(
+                            graph_card(
+                                "Staff vs Caseload",
+                                fig_staff_vs_case,
+                                "capacity-staff-vs-caseload",
+                            ),
+                            width=12,
+                        )
+                    ]
+                )
+            )
 
     return html.Div(
         [
@@ -1835,21 +2144,15 @@ def create_capacity_tab(df):
                 [
                     html.H4("💼 Capacity Analysis", className="alert-heading"),
                     html.P(
-                        "This section is currently under development. "
-                        "Future features will include:"
+                        "Capacity visuals are based on the currently selected provider(s). "
+                        "Use the filters above to change the view."
                     ),
-                    html.Ul(
-                        [
-                            html.Li("Staff capacity by service line"),
-                            html.Li("Staff to caseload ratios"),
-                            html.Li("Workforce planning insights"),
-                            html.Li("Productivity metrics"),
-                        ]
-                    ),
+                    staffing_error if staffing_error is not None else None,
                 ],
                 color="info",
                 className="mt-4",
             ),
+            *capacity_graphs,
             dbc.Row(
                 [
                     dbc.Col(
