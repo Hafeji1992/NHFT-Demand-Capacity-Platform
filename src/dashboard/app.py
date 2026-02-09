@@ -139,6 +139,44 @@ def prettify_column_name(column_id: str) -> str:
     return " ".join(pretty_parts)
 
 
+def _format_provider_code_current(series: pd.Series) -> pd.Series:
+    """Normalise provider codes to a 3-digit string (e.g. 6 -> '006').
+
+    Important:
+        `pd.read_json(..., orient='split')` will often coerce numeric-like strings
+        such as "006" into integers (6), losing leading zeros. This helper
+        re-applies canonical formatting after any JSON roundtrip.
+    """
+
+    if series is None:
+        return series
+
+    s = series.astype("string")
+    s = s.str.strip()
+    s = s.str.replace(r"\.0$", "", regex=True)
+
+    is_digits = s.str.fullmatch(r"\d+", na=False)
+    within_3 = s.str.len().fillna(0).astype(int) <= 3
+    to_pad = is_digits & within_3
+    return s.mask(to_pad, s.str.zfill(3))
+
+
+def _read_filtered_store_frame(data_json: str) -> pd.DataFrame:
+    """Read the filtered patient frame from dcc.Store and normalise key dtypes."""
+
+    df = pd.read_json(StringIO(data_json), orient="split")
+
+    if "provider_code_current" in df.columns:
+        df["provider_code_current"] = _format_provider_code_current(
+            df["provider_code_current"]
+        )
+
+    if "period_end" in df.columns:
+        df["period_end"] = pd.to_datetime(df["period_end"], errors="coerce")
+
+    return df
+
+
 def create_metric_card(
     title: str, value: str, icon: str = "📊", color: str = "primary"
 ):
@@ -1114,6 +1152,12 @@ def filter_data(n_clicks, slider_range, slider_dates, service_lines):
             ]
             df = df[pd.Series(mask, index=df.index)]
 
+    # Ensure provider codes remain canonical before writing to the store.
+    if "provider_code_current" in df.columns:
+        df["provider_code_current"] = _format_provider_code_current(
+            df["provider_code_current"]
+        )
+
     # Store as JSON
     return df.to_json(date_format="iso", orient="split")
 
@@ -1162,7 +1206,7 @@ def update_summary_stats(data_json):
     if data_json is None or data_handler is None:
         return html.Div("No data available", className="alert alert-warning")
 
-    df = pd.read_json(StringIO(data_json), orient="split")
+    df = _read_filtered_store_frame(data_json)
 
     if df.empty:
         return html.Div(
@@ -1170,7 +1214,7 @@ def update_summary_stats(data_json):
         )
 
     # Ensure period_end is datetime
-    df["period_end"] = pd.to_datetime(df["period_end"])
+    df["period_end"] = pd.to_datetime(df["period_end"], errors="coerce")
 
     # Calculate metrics across the entire selected date range
     total_referrals = int(df["referrals"].sum())
@@ -1250,10 +1294,9 @@ def update_footer(data_json):
     if data_json is None or data_handler is None:
         latest_period_end = "N/A"
     else:
-        df = pd.read_json(StringIO(data_json), orient="split")
+        df = _read_filtered_store_frame(data_json)
 
-        if not df.empty:
-            df["period_end"] = pd.to_datetime(df["period_end"])
+        if not df.empty and "period_end" in df.columns:
             latest_period_end = df["period_end"].max().strftime("%d %B %Y")
         else:
             latest_period_end = "N/A"
@@ -1292,9 +1335,7 @@ def update_tab_content(active_tab, data_json):
             className="alert alert-info",
         )
 
-    df = pd.read_json(StringIO(data_json), orient="split")
-
-    df["period_end"] = pd.to_datetime(df["period_end"])
+    df = _read_filtered_store_frame(data_json)
 
     if df.empty:
         return html.Div(
@@ -1545,10 +1586,10 @@ def _waiters_18wk_breakdown_figure(
 def update_overview_keymetrics_timeseries(data_json, forecast_on, visible_metrics):
     if data_json is None:
         return go.Figure()
-    df = pd.read_json(StringIO(data_json), orient="split")
+    df = _read_filtered_store_frame(data_json)
     if df.empty:
         return go.Figure()
-    df["period_end"] = pd.to_datetime(df["period_end"])
+    df["period_end"] = pd.to_datetime(df["period_end"], errors="coerce")
     visible_set = set(visible_metrics or ["referrals", "clock_stop_actuals"])
     return _overview_key_metrics_figure(
         df=df,
@@ -1618,10 +1659,10 @@ def update_overview_keymetrics_visible_metrics(restyle_data, fig, current_visibl
 def update_referrals_timeseries(data_json, forecast_on):
     if data_json is None:
         return go.Figure()
-    df = pd.read_json(StringIO(data_json), orient="split")
+    df = _read_filtered_store_frame(data_json)
     if df.empty:
         return go.Figure()
-    df["period_end"] = pd.to_datetime(df["period_end"])
+    df["period_end"] = pd.to_datetime(df["period_end"], errors="coerce")
     return _metric_timeseries_figure(
         df=df,
         metric="referrals",
@@ -1639,10 +1680,10 @@ def update_referrals_timeseries(data_json, forecast_on):
 def update_waiters_timeseries(data_json, forecast_on):
     if data_json is None:
         return go.Figure()
-    df = pd.read_json(StringIO(data_json), orient="split")
+    df = _read_filtered_store_frame(data_json)
     if df.empty:
         return go.Figure()
-    df["period_end"] = pd.to_datetime(df["period_end"])
+    df["period_end"] = pd.to_datetime(df["period_end"], errors="coerce")
     return _metric_timeseries_figure(
         df=df,
         metric="waiters",
@@ -1660,10 +1701,10 @@ def update_waiters_timeseries(data_json, forecast_on):
 def update_caseload_timeseries(data_json, forecast_on):
     if data_json is None:
         return go.Figure()
-    df = pd.read_json(StringIO(data_json), orient="split")
+    df = _read_filtered_store_frame(data_json)
     if df.empty:
         return go.Figure()
-    df["period_end"] = pd.to_datetime(df["period_end"])
+    df["period_end"] = pd.to_datetime(df["period_end"], errors="coerce")
     return _metric_timeseries_figure(
         df=df,
         metric="caseload",
@@ -1681,10 +1722,10 @@ def update_caseload_timeseries(data_json, forecast_on):
 def update_contacts_timeseries(data_json, forecast_on):
     if data_json is None:
         return go.Figure()
-    df = pd.read_json(StringIO(data_json), orient="split")
+    df = _read_filtered_store_frame(data_json)
     if df.empty:
         return go.Figure()
-    df["period_end"] = pd.to_datetime(df["period_end"])
+    df["period_end"] = pd.to_datetime(df["period_end"], errors="coerce")
     return _metric_timeseries_figure(
         df=df,
         metric="total_contacts",
@@ -1705,10 +1746,10 @@ def update_contacts_timeseries(data_json, forecast_on):
 def update_discharges_timeseries(data_json, forecast_on):
     if data_json is None:
         return go.Figure()
-    df = pd.read_json(StringIO(data_json), orient="split")
+    df = _read_filtered_store_frame(data_json)
     if df.empty:
         return go.Figure()
-    df["period_end"] = pd.to_datetime(df["period_end"])
+    df["period_end"] = pd.to_datetime(df["period_end"], errors="coerce")
     return _metric_timeseries_figure(
         df=df,
         metric="discharges_with_clock_stop",
@@ -1989,7 +2030,7 @@ def update_patient_summary_table(data_json, demand_percentile):
     if data_json is None:
         return [], []
 
-    df = pd.read_json(StringIO(data_json), orient="split")
+    df = _read_filtered_store_frame(data_json)
     if df.empty:
         return [], []
 

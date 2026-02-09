@@ -152,6 +152,29 @@ class StaffingDataExtractor:
 
         return [to_snake_case(col) for col in columns]
 
+    @staticmethod
+    def _format_provider_code_current(series: pd.Series) -> pd.Series:
+        """Normalise provider codes to a 3-digit string (e.g. 6 -> '006').
+
+        Notes:
+            - Handles ints/floats/strings.
+            - Leaves non-numeric values unchanged.
+            - Keeps nulls as <NA>.
+        """
+
+        if series is None:
+            return series
+
+        s = series.astype("string")
+        s = s.str.strip()
+        s = s.str.replace(r"\.0$", "", regex=True)
+
+        is_digits = s.str.fullmatch(r"\d+", na=False)
+        within_3 = s.str.len().fillna(0).astype(int) <= 3
+        to_pad = is_digits & within_3
+        s = s.mask(to_pad, s.str.zfill(3))
+        return s
+
     # -----------------------------------------------------------------
     # Schema Validation
     # -----------------------------------------------------------------
@@ -381,6 +404,12 @@ class StaffingDataExtractor:
             # Normalise column names
             df.columns = self._normalise_column_names(df.columns)
 
+            # Canonicalise provider code formatting at ingestion time
+            if "provider_code_current" in df.columns:
+                df["provider_code_current"] = self._format_provider_code_current(
+                    df["provider_code_current"]
+                )
+
             logger.info(f"✅ Retrieved {len(df):,} rows from source views.")
             logger.info(
                 f"📊 Columns: {', '.join(df.columns)} ({len(df.columns)} total)"
@@ -494,7 +523,16 @@ def load_staffing_data(csv_path: Optional[str] = None) -> pd.DataFrame:
         raise FileNotFoundError(f"Staffing data file not found at: {csv_path}")
 
     logger.info(f"📂 Loading data from: {csv_path}")
-    df = pd.read_csv(csv_path)
+
+    # IMPORTANT: preserve leading zeros for provider_code_current
+    df = pd.read_csv(csv_path, dtype={"provider_code_current": "string"})
+
+    if "provider_code_current" in df.columns:
+        df["provider_code_current"] = (
+            StaffingDataExtractor._format_provider_code_current(
+                df["provider_code_current"]
+            )
+        )
     logger.info(f"✅ Loaded {len(df):,} records with {len(df.columns)} columns")
 
     return df

@@ -73,8 +73,27 @@ class DataHandler:
 
         logger.info(f"📂 Loading patient data from: {filepath}")
 
-        self.patient_df = self._read_csv_with_fallback(filepath)
+        # Preserve provider code leading zeros.
+        self.patient_df = self._read_csv_with_fallback(
+            filepath, dtype={"provider_code_current": "string"}
+        )
         self.patient_df = self._standardise_patient_columns(self.patient_df)
+
+        if "provider_code_current" in self.patient_df.columns:
+            self.patient_df["provider_code_current"] = (
+                self.patient_df["provider_code_current"]
+                .astype("string")
+                .str.strip()
+                .str.replace(r"\.0$", "", regex=True)
+                .where(
+                    ~self.patient_df["provider_code_current"]
+                    .astype("string")
+                    .str.fullmatch(r"\d{1,3}", na=False),
+                    self.patient_df["provider_code_current"]
+                    .astype("string")
+                    .str.zfill(3),
+                )
+            )
 
         if "period_end" not in self.patient_df.columns:
             raise ValueError(
@@ -142,7 +161,29 @@ class DataHandler:
 
         logger.info(f"📂 Loading staffing data from: {filepath}")
 
-        self.staffing_df = self._read_csv_with_fallback(filepath)
+        # Preserve provider code leading zeros.
+        self.staffing_df = self._read_csv_with_fallback(
+            filepath, dtype={"provider_code_current": "string"}
+        )
+
+        if (
+            self.staffing_df is not None
+            and "provider_code_current" in self.staffing_df.columns
+        ):
+            self.staffing_df["provider_code_current"] = (
+                self.staffing_df["provider_code_current"]
+                .astype("string")
+                .str.strip()
+                .str.replace(r"\.0$", "", regex=True)
+                .where(
+                    ~self.staffing_df["provider_code_current"]
+                    .astype("string")
+                    .str.fullmatch(r"\d{1,3}", na=False),
+                    self.staffing_df["provider_code_current"]
+                    .astype("string")
+                    .str.zfill(3),
+                )
+            )
 
         logger.info(f"✅ Loaded {len(self.staffing_df):,} staffing records")
 

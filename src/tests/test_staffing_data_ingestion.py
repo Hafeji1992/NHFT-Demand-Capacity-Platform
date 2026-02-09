@@ -89,6 +89,31 @@ class FakeSQLServerConnection:
         pass
 
 
+class FakeSQLServerConnectionNumericProviderCodes:
+    """Variant that returns numeric provider codes (e.g. 8, 10)."""
+
+    def __init__(self, _config_path=None):
+        pass
+
+    def connect(self):
+        columns = [
+            "provider_code_current",
+            "service_line",
+            "staff_group",
+            "staff",
+        ]
+
+        rows = [
+            (8, "Early Intervention Service", "Allied Health Professionals", 2),
+            (10, "Early Intervention Service", "Nursing and Midwifery Registered", 14),
+        ]
+
+        return FakeConnection(rows, columns)
+
+    def close(self):
+        pass
+
+
 # ---------------------------------------------------------------------
 # Unit Test - Normalise Column Names
 # ---------------------------------------------------------------------
@@ -132,6 +157,19 @@ def test_extract_staffing_data_with_mocked_db(monkeypatch):
     }
     assert set(df.columns) == expected_cols
     assert df["staff"].sum() == 16
+
+
+def test_extract_staffing_data_zero_pads_provider_codes(monkeypatch):
+    """Numeric ProviderCodeCurrent values should be canonicalised to 3 digits."""
+    monkeypatch.setattr(
+        "data_engineering.staffing_data_ingestion.SQLServerConnection",
+        FakeSQLServerConnectionNumericProviderCodes,
+    )
+
+    extractor = StaffingDataExtractor(run_quality_checks=False)
+    df = extractor.extract_staffing_data()
+
+    assert sorted(df["provider_code_current"].unique().tolist()) == ["008", "010"]
 
 
 # ---------------------------------------------------------------------

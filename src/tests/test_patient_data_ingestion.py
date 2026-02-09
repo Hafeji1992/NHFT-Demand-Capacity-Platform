@@ -112,6 +112,81 @@ class FakeSQLServerConnection:
         return None
 
 
+class FakeSQLServerConnectionNumericProviderCodes:
+    """Variant that returns numeric provider codes (e.g. 6, 10)."""
+
+    def __init__(self, _config_path=None):
+        pass
+
+    def connect(self):
+        columns = [
+            "provider_code_current",
+            "service_line",
+            "period_end",
+            "referrals",
+            "clock_stop_actuals",
+            "total_contacts",
+            "ftf_contacts",
+            "caseload",
+            "total_caseload_contacts",
+            "ftf_caseload_contacts",
+            "waiters",
+            "waiters_over_18_weeks",
+            "average_length_of_treatment",
+            "average_contacts_at_discharge",
+            "average_ftf_contacts_at_discharge",
+            "discharges_no_clock_stop",
+            "discharges_with_clock_stop",
+        ]
+
+        rows = [
+            (
+                6,
+                "Adult Acute Inpatients",
+                "2025-01-31",
+                10,
+                8,
+                1,
+                20,
+                15,
+                30,
+                12,
+                8,
+                5,
+                3,
+                2,
+                42.0,
+                3.5,
+                2,
+                7,
+            ),
+            (
+                10,
+                "Adult Acute Inpatients",
+                "2025-01-31",
+                10,
+                8,
+                1,
+                20,
+                15,
+                30,
+                12,
+                8,
+                5,
+                3,
+                2,
+                42.0,
+                3.5,
+                2,
+                7,
+            ),
+        ]
+        return FakeConnection(rows, columns)
+
+    def close(self):
+        return None
+
+
 # ---------------------------------------------------------------------
 # Unit tests - Normalise Column Names
 # ---------------------------------------------------------------------
@@ -153,6 +228,19 @@ def test_extract_patient_data_with_mocked_db(monkeypatch):
     assert "service_line" in df.columns
     assert "waiters_under_18_weeks" in df.columns
     assert "waiters_over_18_weeks" in df.columns
+
+
+def test_extract_patient_data_zero_pads_provider_codes(monkeypatch):
+    """Numeric ProviderCodeCurrent values should be canonicalised to 3 digits."""
+    monkeypatch.setattr(
+        "data_engineering.patient_data_ingestion.SQLServerConnection",
+        FakeSQLServerConnectionNumericProviderCodes,
+    )
+
+    extractor = PatientDataExtractor(run_quality_checks=False)
+    df = extractor.extract_patient_data()
+
+    assert sorted(df["provider_code_current"].unique().tolist()) == ["006", "010"]
 
 
 # ---------------------------------------------------------------------
