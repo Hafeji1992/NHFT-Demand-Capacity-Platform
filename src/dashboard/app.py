@@ -231,7 +231,38 @@ def create_filter_section():
     else:
         service_line_options = []
 
-    min_date, max_date = data_handler.get_date_range()
+    # Build a month-level slider index from patient period_end.
+    if (
+        data_handler.patient_df is not None
+        and "period_end" in data_handler.patient_df.columns
+    ):
+        period_end = pd.to_datetime(
+            data_handler.patient_df["period_end"], errors="coerce"
+        )
+        month_ends = (
+            period_end.dropna()
+            .dt.to_period("M")
+            .dt.to_timestamp("M")
+            .drop_duplicates()
+            .sort_values()
+        )
+        slider_dates = [d.strftime("%Y-%m-%d") for d in month_ends.tolist()]
+    else:
+        slider_dates = []
+
+    # Default range: from the first available month to the latest month
+    default_start_idx = 0
+    default_end_idx = max(0, len(slider_dates) - 1)
+
+    # Slider marks (keep it readable): show April each year + endpoints
+    marks: dict[int, str] = {}
+    if slider_dates:
+        dt = pd.to_datetime(pd.Series(slider_dates), errors="coerce")
+        for idx, d in enumerate(dt.tolist()):
+            if d is None or pd.isna(d):
+                continue
+            if idx in {0, default_end_idx} or d.month == 4:
+                marks[idx] = d.strftime("%b %Y")
 
     return dbc.Row(
         [
@@ -244,11 +275,30 @@ def create_filter_section():
                                 width="auto",
                             ),
                             dbc.Col(
-                                dcc.DatePickerRange(
-                                    id="date-range-picker",
-                                    start_date=min_date,
-                                    end_date=max_date,
-                                    display_format="YYYY-MM-DD",
+                                html.Div(
+                                    [
+                                        dcc.Store(
+                                            id="date-slider-dates",
+                                            data=slider_dates,
+                                        ),
+                                        html.Div(
+                                            id="date-range-slider-label",
+                                            className="text-muted small mb-1",
+                                        ),
+                                        dcc.RangeSlider(
+                                            id="date-range-slider",
+                                            min=0,
+                                            max=max(0, len(slider_dates) - 1),
+                                            step=1,
+                                            value=[default_start_idx, default_end_idx],
+                                            marks=marks,
+                                            allowCross=False,
+                                            tooltip={
+                                                "placement": "bottom",
+                                                "always_visible": False,
+                                            },
+                                        ),
+                                    ]
                                 ),
                                 width=True,
                             ),
@@ -333,6 +383,7 @@ def _metric_timeseries_figure(
     label: str,
     color: str,
     forecast_on: bool,
+    monthly_ticks: bool = True,
 ) -> go.Figure:
     """Create a single-metric time series figure with optional ETS forecast."""
     y = _monthly_series_from_filtered_df(df, metric)
@@ -343,15 +394,8 @@ def _metric_timeseries_figure(
             title=dict(text=label, x=0.5, xanchor="center"),
             template="plotly_white",
             height=420,
-        )
-        fig.add_annotation(
-            xref="paper",
-            yref="paper",
-            x=0.5,
-            y=0.5,
-            text="No data available for selected filters",
-            showarrow=False,
-            font=dict(size=14, color="rgba(0,0,0,0.65)"),
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
         )
         return fig
 
@@ -379,7 +423,6 @@ def _metric_timeseries_figure(
         )
     )
 
-    # Optional forecast (only for this metric)
     if bool(forecast_on):
         try:
             if len(y) >= 12 and y.nunique() >= 2:
@@ -563,10 +606,11 @@ def _metric_timeseries_figure(
         tickangle=-30,
         ticks="outside",
         ticklen=6,
-        dtick="M1",
-        tickformat="%B %Y",
-        hoverformat="%B %Y",
+        tickformat="%b %Y",
+        hoverformat="%b %Y",
     )
+    if bool(monthly_ticks):
+        fig.update_xaxes(dtick="M1")
     fig.update_yaxes(
         tickformat=",",
         showgrid=True,
@@ -978,12 +1022,12 @@ app.layout = dbc.Container(
     Output("filtered-data-store", "data"),
     [Input("apply-filters-btn", "n_clicks")],
     [
-        State("date-range-picker", "start_date"),
-        State("date-range-picker", "end_date"),
+        State("date-range-slider", "value"),
+        State("date-slider-dates", "data"),
         State("service-line-dropdown", "value"),
     ],
 )
-def filter_data(n_clicks, start_date, end_date, service_lines):
+def filter_data(n_clicks, slider_range, slider_dates, service_lines):
     """Filter patient data based on the UI controls.
 
     Args:
@@ -1002,9 +1046,24 @@ def filter_data(n_clicks, start_date, end_date, service_lines):
 
     df = data_handler.patient_df.copy()
 
-    # Apply filters
-    if start_date and end_date:
-        df = data_handler.filter_by_date_range(df, start_date, end_date)
+    # Apply date filter from slider indices
+    if (
+        slider_dates
+        and isinstance(slider_range, (list, tuple))
+        and len(slider_range) == 2
+    ):
+        try:
+            start_idx = int(slider_range[0])
+            end_idx = int(slider_range[1])
+            start_idx = max(0, min(start_idx, len(slider_dates) - 1))
+            end_idx = max(0, min(end_idx, len(slider_dates) - 1))
+            if start_idx > end_idx:
+                start_idx, end_idx = end_idx, start_idx
+            start_date = slider_dates[start_idx]
+            end_date = slider_dates[end_idx]
+            df = data_handler.filter_by_date_range(df, start_date, end_date)
+        except Exception:
+            pass
 
     if service_lines:
         # Users select service labels, but we filter by provider code only.
@@ -1013,6 +1072,34 @@ def filter_data(n_clicks, start_date, end_date, service_lines):
 
     # Store as JSON
     return df.to_json(date_format="iso", orient="split")
+
+
+@app.callback(
+    Output("date-range-slider-label", "children"),
+    [Input("date-range-slider", "value")],
+    [State("date-slider-dates", "data")],
+)
+def update_date_slider_label(slider_range, slider_dates):
+    if (
+        not slider_dates
+        or not isinstance(slider_range, (list, tuple))
+        or len(slider_range) != 2
+    ):
+        return "Date range: N/A"
+    try:
+        start_idx = int(slider_range[0])
+        end_idx = int(slider_range[1])
+        start_idx = max(0, min(start_idx, len(slider_dates) - 1))
+        end_idx = max(0, min(end_idx, len(slider_dates) - 1))
+        if start_idx > end_idx:
+            start_idx, end_idx = end_idx, start_idx
+        start_dt = pd.to_datetime(slider_dates[start_idx], errors="coerce")
+        end_dt = pd.to_datetime(slider_dates[end_idx], errors="coerce")
+        if pd.isna(start_dt) or pd.isna(end_dt):
+            return "Date range: N/A"
+        return f"Date range: {start_dt.strftime('%b %Y')} to {end_dt.strftime('%b %Y')}"
+    except Exception:
+        return "Date range: N/A"
 
 
 @app.callback(
@@ -1048,6 +1135,22 @@ def update_summary_stats(data_json):
     total_contacts = int(df["total_contacts"].sum())
     total_discharges = int(df["discharges_with_clock_stop"].sum())
 
+    # Capacity metric (staff is not time-indexed in the current dataset)
+    total_staff_value: Optional[int] = None
+    if data_handler is not None and data_handler.staffing_df is not None:
+        staffing_filtered, staffing_error = _capacity_filter_staffing(
+            df, data_handler.staffing_df
+        )
+        if staffing_filtered is not None and staffing_error is None:
+            try:
+                total_staff_value = int(round(float(staffing_filtered["staff"].sum())))
+            except Exception:
+                total_staff_value = None
+
+    total_staff_display = (
+        f"{total_staff_value:,}" if total_staff_value is not None else "N/A"
+    )
+
     return dbc.Row(
         [
             dbc.Col(
@@ -1071,6 +1174,15 @@ def update_summary_stats(data_json):
             dbc.Col(
                 create_metric_card(
                     "Discharges", f"{total_discharges:,}", "✅", "secondary"
+                ),
+                width=2,
+            ),
+            dbc.Col(
+                create_metric_card(
+                    "Total Staff",
+                    total_staff_display,
+                    "🧑‍⚕️",
+                    "dark",
                 ),
                 width=2,
             ),
@@ -1212,42 +1324,129 @@ def create_overview_tab(df):
     )
 
     # -----------------------------
+    # Capacity: Staff vs Caseload (latest)
+    # -----------------------------
+    staff_vs_caseload_card = None
+    if data_handler is not None:
+        staffing_filtered, staffing_error = _capacity_filter_staffing(
+            df, data_handler.staffing_df
+        )
+        if staffing_filtered is not None and staffing_error is None:
+            fig_staff_vs_case = _capacity_staff_vs_caseload_latest_figure(
+                df, staffing_filtered
+            )
+            if fig_staff_vs_case is not None:
+                staff_vs_caseload_card = dbc.Card(
+                    [
+                        dbc.CardHeader(
+                            html.H5("Staff vs Caseload (Latest)", className="mb-0")
+                        ),
+                        dbc.CardBody(
+                            dcc.Graph(
+                                id="overview-staff-vs-caseload",
+                                figure=fig_staff_vs_case,
+                            ),
+                            className="p-2",
+                        ),
+                    ],
+                    className="mb-4 shadow-sm",
+                )
+
+    # -----------------------------
     # 18-week waiters split (stacked bar)
     # -----------------------------
-    waiters_18wk = df_sorted.groupby("year_month", as_index=False).agg(
+    fig_18wk = _waiters_18wk_breakdown_figure(df_sorted, monthly_ticks=True)
+    waiters_chart = dbc.Card(
+        [
+            dbc.CardHeader(
+                html.H5(
+                    "Waiting List Breakdown (Under vs Over 18 Weeks)",
+                    className="mb-0",
+                )
+            ),
+            dbc.CardBody(
+                dcc.Graph(id="overview-waiters-breakdown", figure=fig_18wk),
+                className="p-2",
+            ),
+        ],
+        className="mb-4 shadow-sm",
+    )
+
+    # -----------------------------
+    # Layout
+    # -----------------------------
+    return html.Div(
+        [
+            dbc.Alert(
+                [
+                    html.H4("📈 Overview", className="alert-heading"),
+                    html.P(
+                        "Use the filters above to change the view. In charts, you can click legend items to show/hide metrics. "
+                        "Forecast toggles apply per chart (Overview and Demand Analysis)."
+                    ),
+                    html.P(
+                        "Forecasting note: ETS / exponential smoothing (Holt-Winters) works best with enough history to learn seasonality. "
+                        "For monthly data, adjust the date selector to 2-3 years (~24-36 points) when forecasting."
+                    ),
+                ],
+                color="info",
+                className="mt-4",
+            ),
+            dcc.Store(
+                id="overview-keymetrics-visible-metrics",
+                data=default_visible_metrics,
+            ),
+            key_metrics_chart,
+            staff_vs_caseload_card,
+            waiters_chart,
+        ]
+    )
+
+
+def _waiters_18wk_breakdown_figure(
+    df_sorted: pd.DataFrame,
+    *,
+    monthly_ticks: bool = False,
+) -> go.Figure:
+    """Build the stacked bar chart for under/over 18-week waiters by month."""
+    base = df_sorted.copy()
+    if "year_month" not in base.columns:
+        base["year_month"] = (
+            pd.to_datetime(base["period_end"]).dt.to_period("M").astype(str)
+        )
+
+    waiters_18wk = base.groupby("year_month", as_index=False).agg(
         waiters_under_18_weeks=("waiters_under_18_weeks", "sum"),
         waiters_over_18_weeks=("waiters_over_18_weeks", "sum"),
     )
 
-    fig_18wk = go.Figure()
+    # Use a real date x-axis so we can control tick density.
+    x_dates = pd.PeriodIndex(waiters_18wk["year_month"].astype(str), freq="M").to_timestamp(
+        "M"
+    )
 
-    fig_18wk.add_trace(
+    fig = go.Figure()
+    fig.add_trace(
         go.Bar(
-            x=waiters_18wk["year_month"],
+            x=x_dates,
             y=waiters_18wk["waiters_under_18_weeks"],
             name="Under 18 Weeks",
-            marker_color="#636EFA",  # Plotly blue
+            marker_color="#636EFA",
             hovertemplate="%{fullData.name}: <b>%{y:,}</b><extra></extra>",
         )
     )
-
-    fig_18wk.add_trace(
+    fig.add_trace(
         go.Bar(
-            x=waiters_18wk["year_month"],
+            x=x_dates,
             y=waiters_18wk["waiters_over_18_weeks"],
             name="18+ Weeks",
-            marker_color="#EF553B",  # Plotly red
+            marker_color="#EF553B",
             hovertemplate="%{fullData.name}: <b>%{y:,}</b><extra></extra>",
         )
     )
 
-    fig_18wk.update_layout(
-        title=dict(
-            text="Waiting List Breakdown: Under vs Over 18 Weeks",
-            x=0.5,
-            xanchor="center",
-            font=dict(size=20),
-        ),
+    fig.update_layout(
+        title=None,
         xaxis_title="Period",
         yaxis_title="Number of Waiters",
         barmode="stack",
@@ -1272,50 +1471,23 @@ def create_overview_tab(df):
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
     )
-
-    fig_18wk.update_xaxes(
+    fig.update_xaxes(
         showgrid=False,
         tickangle=-30,
         ticks="outside",
         ticklen=6,
+        tickformat="%b %Y",
+        hoverformat="%b %Y",
     )
-    fig_18wk.update_yaxes(
+    if bool(monthly_ticks):
+        fig.update_xaxes(dtick="M1")
+    fig.update_yaxes(
         tickformat=",",
         showgrid=True,
         gridcolor="rgba(0,0,0,0.08)",
         zeroline=False,
     )
-
-    waiters_chart = dbc.Row(
-        [
-            dbc.Col(
-                dcc.Graph(figure=fig_18wk),
-                width=12,
-            ),
-        ],
-        className="mb-4",
-    )
-
-    # -----------------------------
-    # Layout
-    # -----------------------------
-    return html.Div(
-        [
-            dbc.Alert(
-                "Tip: use the legend to show/hide metrics. Forecast toggles are per-chart (Overview + Demand Analysis).",
-                color="secondary",
-                className="mt-3",
-            ),
-            dcc.Store(
-                id="overview-keymetrics-visible-metrics",
-                data=default_visible_metrics,
-            ),
-            # Key metrics combined time-series (legend selectable)
-            key_metrics_chart,
-            # Stacked 18-week bar chart
-            waiters_chart,
-        ]
-    )
+    return fig
 
 
 @app.callback(
@@ -1412,6 +1584,7 @@ def update_referrals_timeseries(data_json, forecast_on):
         label="Referrals",
         color="#636EFA",
         forecast_on=bool(forecast_on),
+        monthly_ticks=False,
     )
 
 
@@ -1432,6 +1605,7 @@ def update_waiters_timeseries(data_json, forecast_on):
         label="Waiters",
         color="#EF553B",
         forecast_on=bool(forecast_on),
+        monthly_ticks=False,
     )
 
 
@@ -1452,6 +1626,7 @@ def update_caseload_timeseries(data_json, forecast_on):
         label="Caseload",
         color="#00CC96",
         forecast_on=bool(forecast_on),
+        monthly_ticks=False,
     )
 
 
@@ -1472,6 +1647,7 @@ def update_contacts_timeseries(data_json, forecast_on):
         label="Contacts",
         color="#AB63FA",
         forecast_on=bool(forecast_on),
+        monthly_ticks=False,
     )
 
 
@@ -1495,6 +1671,7 @@ def update_discharges_timeseries(data_json, forecast_on):
         label="Discharges",
         color="#FFA15A",
         forecast_on=bool(forecast_on),
+        monthly_ticks=False,
     )
 
 
@@ -1708,6 +1885,241 @@ def create_staffing_pivot_table(
     )
 
 
+def _capacity_filter_staffing(
+    patient_df: pd.DataFrame,
+    staffing_df: Optional[pd.DataFrame],
+) -> tuple[Optional[pd.DataFrame], Optional[html.Div]]:
+    """Filter staffing dataset to the providers currently selected in patient_df."""
+
+    if staffing_df is None or staffing_df.empty:
+        return None, html.Div(
+            "No staffing data available.",
+            className="alert alert-warning",
+        )
+
+    required_cols = {"provider_code_current", "service_line", "staff_group", "staff"}
+    if not required_cols.issubset(set(staffing_df.columns)):
+        missing = sorted(required_cols - set(staffing_df.columns))
+        return None, html.Div(
+            f"Staffing data is missing required columns: {', '.join(missing)}",
+            className="alert alert-danger",
+        )
+
+    selected_providers: list[str] = []
+    if (
+        patient_df is not None
+        and not patient_df.empty
+        and "provider_code_current" in patient_df.columns
+    ):
+        selected_providers = (
+            patient_df["provider_code_current"].dropna().astype(str).unique().tolist()
+        )
+
+    staffing_filtered = staffing_df.copy()
+    staffing_filtered["provider_code_current"] = staffing_filtered[
+        "provider_code_current"
+    ].astype(str)
+
+    if selected_providers:
+        staffing_filtered = staffing_filtered[
+            staffing_filtered["provider_code_current"].isin(
+                [str(p) for p in selected_providers]
+            )
+        ]
+
+    staffing_filtered["staff"] = pd.to_numeric(
+        staffing_filtered["staff"], errors="coerce"
+    ).fillna(0)
+
+    if staffing_filtered.empty:
+        return None, html.Div(
+            "No staffing rows match the selected provider(s).",
+            className="alert alert-info",
+        )
+
+    return staffing_filtered, None
+
+
+def _capacity_style_figure(fig: go.Figure) -> go.Figure:
+    """Apply a consistent, dashboard-friendly Plotly style."""
+    fig.update_layout(
+        margin=dict(l=40, r=40, t=60, b=40),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        legend=dict(
+            bgcolor="rgba(255,255,255,0.85)",
+            bordercolor="rgba(0,0,0,0.08)",
+            borderwidth=1,
+        ),
+    )
+    fig.update_yaxes(
+        tickformat=",",
+        showgrid=True,
+        gridcolor="rgba(0,0,0,0.08)",
+        zeroline=False,
+    )
+    return fig
+
+
+def _capacity_staff_mix_by_group_figure(staffing_filtered: pd.DataFrame) -> go.Figure:
+    by_group = (
+        staffing_filtered.groupby("staff_group", as_index=False)
+        .agg(staff=("staff", "sum"))
+        .sort_values("staff", ascending=True)
+    )
+    fig = px.bar(
+        by_group,
+        x="staff",
+        y="staff_group",
+        orientation="h",
+        title="Total Staff by Staff Group",
+        labels={"staff": "Staff (count)", "staff_group": "Staff group"},
+    )
+    fig.update_traces(hovertemplate="%{y}<br>Staff: %{x:,}<extra></extra>")
+    return _capacity_style_figure(fig)
+
+
+def _capacity_staff_by_service_line_figure(
+    staffing_filtered: pd.DataFrame,
+) -> go.Figure:
+    if staffing_filtered is None or staffing_filtered.empty:
+        fig = go.Figure()
+        fig.update_layout(
+            title=dict(text="Total Staff by Service Line", x=0.5, xanchor="center"),
+            template="plotly_white",
+            height=420,
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+        )
+        return fig
+
+    if "service_line" not in staffing_filtered.columns:
+        fig = go.Figure()
+        fig.update_layout(
+            title=dict(text="Total Staff by Service Line", x=0.5, xanchor="center"),
+            template="plotly_white",
+            height=420,
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+        )
+        return fig
+
+    by_service_line = (
+        staffing_filtered.groupby("service_line", as_index=False)
+        .agg(staff=("staff", "sum"))
+        .sort_values("staff", ascending=True)
+    )
+
+    n_lines = int(by_service_line.shape[0])
+    fig_height = max(450, min(2400, 26 * n_lines + 200))
+
+    fig = px.bar(
+        by_service_line,
+        x="staff",
+        y="service_line",
+        orientation="h",
+        title="Total Staff by Service Line",
+        labels={"staff": "Staff (count)", "service_line": "Service line"},
+        height=fig_height,
+    )
+    fig.update_traces(hovertemplate="%{y}<br>Staff: %{x:,}<extra></extra>")
+    fig.update_xaxes(showgrid=False)
+    return _capacity_style_figure(fig)
+
+
+def _capacity_staff_vs_caseload_latest_figure(
+    patient_df: pd.DataFrame,
+    staffing_filtered: pd.DataFrame,
+) -> Optional[go.Figure]:
+    if patient_df is None or patient_df.empty or "caseload" not in patient_df.columns:
+        return None
+
+    required_patient_cols = {
+        "provider_code_current",
+        "service_line",
+        "period_end",
+        "caseload",
+    }
+    if not required_patient_cols.issubset(set(patient_df.columns)):
+        return None
+
+    df = patient_df.copy()
+    df["period_end"] = pd.to_datetime(df["period_end"], errors="coerce")
+    latest_period_end = df["period_end"].max()
+    if pd.isna(latest_period_end):
+        return None
+
+    latest = df[df["period_end"] == latest_period_end].copy()
+    latest["provider_code_current"] = latest["provider_code_current"].astype(str)
+
+    demand_latest = latest.groupby(
+        ["provider_code_current", "service_line"], as_index=False
+    ).agg(caseload=("caseload", "sum"))
+    demand_latest["caseload"] = pd.to_numeric(
+        demand_latest["caseload"], errors="coerce"
+    ).fillna(0)
+
+    staff_totals = staffing_filtered.groupby(
+        ["provider_code_current", "service_line"], as_index=False
+    ).agg(staff=("staff", "sum"))
+
+    merged = demand_latest.merge(
+        staff_totals,
+        on=["provider_code_current", "service_line"],
+        how="inner",
+    )
+
+    if merged.empty:
+        return None
+
+    merged["service_label"] = (
+        merged["provider_code_current"].astype(str)
+        + " - "
+        + merged["service_line"].astype(str)
+    )
+    merged["staff_per_100_caseload"] = merged.apply(
+        lambda r: (
+            (r["staff"] / r["caseload"] * 100) if float(r["caseload"]) > 0 else None
+        ),
+        axis=1,
+    )
+
+    # Keep a clean analytic frame for the trendline
+    plot_df = merged.copy()
+    plot_df["caseload"] = pd.to_numeric(plot_df["caseload"], errors="coerce")
+    plot_df["staff"] = pd.to_numeric(plot_df["staff"], errors="coerce")
+    plot_df = plot_df.dropna(subset=["caseload", "staff"])
+
+    fig = px.scatter(
+        plot_df,
+        x="caseload",
+        y="staff",
+        color="staff_per_100_caseload",
+        size="caseload",
+        size_max=40,
+        trendline="ols",
+        hover_name="service_label",
+        hover_data={
+            "caseload": ":,",
+            "staff": ":,",
+            "staff_per_100_caseload": ":.2f",
+            "service_label": False,
+        },
+        title=f"Staff vs Caseload (Latest period: {latest_period_end.strftime('%b %Y')})",
+        labels={
+            "caseload": "Caseload (latest)",
+            "staff": "Staff (total)",
+            "staff_per_100_caseload": "Staff per 100 caseload",
+        },
+    )
+    fig.update_traces(
+        marker=dict(opacity=0.75, line=dict(width=1, color="rgba(0,0,0,0.15)"))
+    )
+    fig.update_xaxes(showgrid=False, tickformat=",")
+    fig.update_yaxes(tickformat=",")
+    return _capacity_style_figure(fig)
+
+
 def create_demand_tab(df):
     """Create the Demand tab layout.
 
@@ -1717,6 +2129,30 @@ def create_demand_tab(df):
     Returns:
         A Dash layout component containing the demand alert and patient summary table.
     """
+
+    df_sorted = df.sort_values("period_end")
+    if "year_month" not in df_sorted.columns:
+        df_sorted = df_sorted.copy()
+        df_sorted["year_month"] = (
+            pd.to_datetime(df_sorted["period_end"]).dt.to_period("M").astype(str)
+        )
+
+    fig_18wk = _waiters_18wk_breakdown_figure(df_sorted, monthly_ticks=False)
+    waiters_breakdown_card = dbc.Card(
+        [
+            dbc.CardHeader(
+                html.H5(
+                    "Waiting List Breakdown (Under vs Over 18 Weeks)",
+                    className="mb-0",
+                )
+            ),
+            dbc.CardBody(
+                dcc.Graph(id="demand-waiters-breakdown", figure=fig_18wk),
+                className="p-2",
+            ),
+        ],
+        className="mb-4 shadow-sm",
+    )
 
     summary_table = create_service_line_summary_table(df)
 
@@ -1749,6 +2185,20 @@ def create_demand_tab(df):
 
     return html.Div(
         [
+            dbc.Alert(
+                [
+                    html.H4("👥 Demand Analysis", className="alert-heading"),
+                    html.P(
+                        "Use the filters above to change the view. Each chart has its own forecast toggle (ETS with 95% CI)."
+                    ),
+                    html.P(
+                        "Forecasting note: ETS / exponential smoothing (Holt-Winters) works best with enough history to learn seasonality. "
+                        "For monthly data, adjust the date selector to 2-3 years (~24-36 points) when forecasting."
+                    ),
+                ],
+                color="info",
+                className="mt-4",
+            ),
             dbc.Row(
                 [
                     dbc.Col(
@@ -1795,7 +2245,11 @@ def create_demand_tab(df):
                             "discharges-timeseries",
                             "discharges-forecast-toggle",
                         ),
-                        width=12,
+                        width=6,
+                    ),
+                    dbc.Col(
+                        waiters_breakdown_card,
+                        width=6,
                     ),
                 ]
             ),
@@ -1827,7 +2281,90 @@ def create_capacity_tab(df):
     if data_handler is None:
         return html.Div("Data not available", className="alert alert-danger")
 
+    staffing_filtered, staffing_error = _capacity_filter_staffing(
+        df, data_handler.staffing_df
+    )
+
     staffing_table = create_staffing_pivot_table(df, data_handler.staffing_df)
+
+    capacity_graphs = []
+    if staffing_filtered is not None and staffing_error is None:
+        fig_by_group = _capacity_staff_mix_by_group_figure(staffing_filtered)
+        fig_by_service_line = _capacity_staff_by_service_line_figure(staffing_filtered)
+        fig_staff_vs_case = _capacity_staff_vs_caseload_latest_figure(
+            df, staffing_filtered
+        )
+
+        def graph_card(title: str, fig: go.Figure, graph_id: str):
+            return dbc.Card(
+                [
+                    dbc.CardHeader(html.H5(title, className="mb-0")),
+                    dbc.CardBody(dcc.Graph(id=graph_id, figure=fig), className="p-2"),
+                ],
+                className="mb-4 shadow-sm",
+            )
+
+        capacity_graphs.append(
+            dbc.Row(
+                [
+                    dbc.Col(
+                        graph_card(
+                            "Staff by Group",
+                            fig_by_group,
+                            "capacity-staff-by-group",
+                        ),
+                        width=12,
+                    ),
+                ]
+            )
+        )
+
+        capacity_graphs.append(
+            dbc.Row(
+                [
+                    dbc.Col(
+                        dbc.Card(
+                            [
+                                dbc.CardHeader(
+                                    html.H5("Staff by Service Line", className="mb-0")
+                                ),
+                                dbc.CardBody(
+                                    html.Div(
+                                        dcc.Graph(
+                                            id="capacity-staff-by-service-line",
+                                            figure=fig_by_service_line,
+                                        ),
+                                        style={
+                                            "height": "560px",
+                                            "overflowY": "auto",
+                                        },
+                                    ),
+                                    className="p-2",
+                                ),
+                            ],
+                            className="mb-4 shadow-sm",
+                        ),
+                        width=12,
+                    ),
+                ]
+            )
+        )
+
+        if fig_staff_vs_case is not None:
+            capacity_graphs.append(
+                dbc.Row(
+                    [
+                        dbc.Col(
+                            graph_card(
+                                "Staff vs Caseload",
+                                fig_staff_vs_case,
+                                "capacity-staff-vs-caseload",
+                            ),
+                            width=12,
+                        )
+                    ]
+                )
+            )
 
     return html.Div(
         [
@@ -1835,21 +2372,15 @@ def create_capacity_tab(df):
                 [
                     html.H4("💼 Capacity Analysis", className="alert-heading"),
                     html.P(
-                        "This section is currently under development. "
-                        "Future features will include:"
+                        "Capacity visuals are based on the currently selected provider(s). "
+                        "Use the filters above to change the view."
                     ),
-                    html.Ul(
-                        [
-                            html.Li("Staff capacity by service line"),
-                            html.Li("Staff to caseload ratios"),
-                            html.Li("Workforce planning insights"),
-                            html.Li("Productivity metrics"),
-                        ]
-                    ),
+                    staffing_error if staffing_error is not None else None,
                 ],
                 color="info",
                 className="mt-4",
             ),
+            *capacity_graphs,
             dbc.Row(
                 [
                     dbc.Col(
