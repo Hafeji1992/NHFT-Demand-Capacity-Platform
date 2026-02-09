@@ -44,58 +44,41 @@ class StaffingDataExtractor:
 
     # SQL query as class constant for better maintainability
     STAFFING_QUERY = """
-        -- ============================================================================
+		-- ============================================================================
         -- STAFFING DATA EXTRACTION QUERY
         -- ============================================================================
         -- Purpose: Extract staffing capacity metrics from ESR appraisal review data,
         -- pulling staff counts by provider, service line, and staff group.
         -- ============================================================================
         SELECT
-            COUNT(DISTINCT [Assignment Number]) AS [Staff],
-            [Staff Group],
+            SUBSTRING(ARD.[Org L6], CHARINDEX('L5 ', ARD.[Org L6]) + 3, 3) AS [ProviderCodeCurrent], -- Provider code: the 3 digits after 'L5 '
+			SL.[Service_Line],
+            ARD.[Staff Group],
+            COUNT(DISTINCT ARD.[Assignment Number]) AS [Staff]
 
-            -- ======================================================================== 
-            -- PROVIDER CODE EXTRACTION
-            -- ========================================================================
-            -- Provider code: the 3 digits after 'L5 '
-            SUBSTRING(
-                [Org L6],
-                CHARINDEX('L5 ', [Org L6]) + 3,
-                3
-            ) AS [ProviderCodeCurrent],
-
-            -- ======================================================================== 
-            -- SERVICE LINE EXTRACTION
-            -- ========================================================================
-            -- Service line: text after 'L5 XXX '
-            LTRIM(
-                SUBSTRING(
-                    [Org L6],
-                    CHARINDEX('L5 ', [Org L6]) + 7,
-                    LEN([Org L6])
-                )
-            ) AS [Service_Line]
-
-        FROM [ISEVSQLMIS-BLK].[ESR].[dbo].[tbl_dt_Appraisal_Review_Detail]
-
-        WHERE [Org L6] LIKE '%L5 [0-9][0-9][0-9] %'
+        FROM [ISEVSQLMIS-BLK].[ESR].[dbo].[tbl_dt_Appraisal_Review_Detail] AS ARD
+		LEFT JOIN [MIS_Config].[dbo].[tbl_org_current_RL9_Service_Line] AS SL ON SUBSTRING(ARD.[Org L6], CHARINDEX('L5 ', ARD.[Org L6]) + 3, 3) = SL.[Service_Codes]
+		
+		WHERE SL.[Status] = 'ACTIVE'
+		AND SL.[RTT_Report_Enabled] = 1 -- RTT Reporting Only Services
 
         GROUP BY
-            [Org L6],
-            [Staff Group]
+            ARD.[Org L6],
+			SL.[Service_Line],
+            ARD.[Staff Group]
 
         ORDER BY
-            [ProviderCodeCurrent],
-            [Service_Line],
-            [Staff Group];
+            ARD.[Org L6],
+            SL.[Service_Line],
+            ARD.[Staff Group];
     """
 
     # Expected columns after normalisation
     EXPECTED_COLUMNS = [
-        "staff",
-        "staff_group",
         "provider_code_current",
         "service_line",
+        "staff_group",
+        "staff",
     ]
 
     # -----------------------------------------------------------------
