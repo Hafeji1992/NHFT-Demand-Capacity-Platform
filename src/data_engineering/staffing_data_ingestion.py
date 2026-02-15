@@ -44,58 +44,41 @@ class StaffingDataExtractor:
 
     # SQL query as class constant for better maintainability
     STAFFING_QUERY = """
-        -- ============================================================================
+		-- ============================================================================
         -- STAFFING DATA EXTRACTION QUERY
         -- ============================================================================
         -- Purpose: Extract staffing capacity metrics from ESR appraisal review data,
         -- pulling staff counts by provider, service line, and staff group.
         -- ============================================================================
         SELECT
-            COUNT(DISTINCT [Assignment Number]) AS [Staff],
-            [Staff Group],
+            SUBSTRING(ARD.[Org L6], CHARINDEX('L5 ', ARD.[Org L6]) + 3, 3) AS [ProviderCodeCurrent], -- Provider code: the 3 digits after 'L5 '
+			SL.[Service_Line],
+            ARD.[Staff Group],
+            COUNT(DISTINCT ARD.[Assignment Number]) AS [Staff]
 
-            -- ======================================================================== 
-            -- PROVIDER CODE EXTRACTION
-            -- ========================================================================
-            -- Provider code: the 3 digits after 'L5 '
-            SUBSTRING(
-                [Org L6],
-                CHARINDEX('L5 ', [Org L6]) + 3,
-                3
-            ) AS [ProviderCodeCurrent],
-
-            -- ======================================================================== 
-            -- SERVICE LINE EXTRACTION
-            -- ========================================================================
-            -- Service line: text after 'L5 XXX '
-            LTRIM(
-                SUBSTRING(
-                    [Org L6],
-                    CHARINDEX('L5 ', [Org L6]) + 7,
-                    LEN([Org L6])
-                )
-            ) AS [Service_Line]
-
-        FROM [ISEVSQLMIS-BLK].[ESR].[dbo].[tbl_dt_Appraisal_Review_Detail]
-
-        WHERE [Org L6] LIKE '%L5 [0-9][0-9][0-9] %'
+        FROM [ISEVSQLMIS-BLK].[ESR].[dbo].[tbl_dt_Appraisal_Review_Detail] AS ARD
+		LEFT JOIN [MIS_Config].[dbo].[tbl_org_current_RL9_Service_Line] AS SL ON SUBSTRING(ARD.[Org L6], CHARINDEX('L5 ', ARD.[Org L6]) + 3, 3) = SL.[Service_Codes]
+		
+		WHERE SL.[Status] = 'ACTIVE'
+		AND SL.[RTT_Report_Enabled] = 1 -- RTT Reporting Only Services
 
         GROUP BY
-            [Org L6],
-            [Staff Group]
+            ARD.[Org L6],
+			SL.[Service_Line],
+            ARD.[Staff Group]
 
         ORDER BY
-            [ProviderCodeCurrent],
-            [Service_Line],
-            [Staff Group];
+            ARD.[Org L6],
+            SL.[Service_Line],
+            ARD.[Staff Group];
     """
 
     # Expected columns after normalisation
     EXPECTED_COLUMNS = [
-        "staff",
-        "staff_group",
         "provider_code_current",
         "service_line",
+        "staff_group",
+        "staff",
     ]
 
     # -----------------------------------------------------------------
@@ -168,6 +151,29 @@ class StaffingDataExtractor:
             return name
 
         return [to_snake_case(col) for col in columns]
+
+    @staticmethod
+    def _format_provider_code_current(series: pd.Series) -> pd.Series:
+        """Normalise provider codes to a 3-digit string (e.g. 6 -> '006').
+
+        Notes:
+            - Handles ints/floats/strings.
+            - Leaves non-numeric values unchanged.
+            - Keeps nulls as <NA>.
+        """
+
+        if series is None:
+            return series
+
+        s = series.astype("string")
+        s = s.str.strip()
+        s = s.str.replace(r"\.0$", "", regex=True)
+
+        is_digits = s.str.fullmatch(r"\d+", na=False)
+        within_3 = s.str.len().fillna(0).astype(int) <= 3
+        to_pad = is_digits & within_3
+        s = s.mask(to_pad, s.str.zfill(3))
+        return s
 
     # -----------------------------------------------------------------
     # Schema Validation
@@ -398,6 +404,12 @@ class StaffingDataExtractor:
             # Normalise column names
             df.columns = self._normalise_column_names(df.columns)
 
+            # Canonicalise provider code formatting at ingestion time
+            if "provider_code_current" in df.columns:
+                df["provider_code_current"] = self._format_provider_code_current(
+                    df["provider_code_current"]
+                )
+
             logger.info(f"✅ Retrieved {len(df):,} rows from source views.")
             logger.info(
                 f"📊 Columns: {', '.join(df.columns)} ({len(df.columns)} total)"
@@ -511,7 +523,16 @@ def load_staffing_data(csv_path: Optional[str] = None) -> pd.DataFrame:
         raise FileNotFoundError(f"Staffing data file not found at: {csv_path}")
 
     logger.info(f"📂 Loading data from: {csv_path}")
-    df = pd.read_csv(csv_path)
+
+    # IMPORTANT: preserve leading zeros for provider_code_current
+    df = pd.read_csv(csv_path, dtype={"provider_code_current": "string"})
+
+    if "provider_code_current" in df.columns:
+        df["provider_code_current"] = (
+            StaffingDataExtractor._format_provider_code_current(
+                df["provider_code_current"]
+            )
+        )
     logger.info(f"✅ Loaded {len(df):,} records with {len(df.columns)} columns")
 
     return df

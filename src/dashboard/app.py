@@ -139,6 +139,44 @@ def prettify_column_name(column_id: str) -> str:
     return " ".join(pretty_parts)
 
 
+def _format_provider_code_current(series: pd.Series) -> pd.Series:
+    """Normalise provider codes to a 3-digit string (e.g. 6 -> '006').
+
+    Important:
+        `pd.read_json(..., orient='split')` will often coerce numeric-like strings
+        such as "006" into integers (6), losing leading zeros. This helper
+        re-applies canonical formatting after any JSON roundtrip.
+    """
+
+    if series is None:
+        return series
+
+    s = series.astype("string")
+    s = s.str.strip()
+    s = s.str.replace(r"\.0$", "", regex=True)
+
+    is_digits = s.str.fullmatch(r"\d+", na=False)
+    within_3 = s.str.len().fillna(0).astype(int) <= 3
+    to_pad = is_digits & within_3
+    return s.mask(to_pad, s.str.zfill(3))
+
+
+def _read_filtered_store_frame(data_json: str) -> pd.DataFrame:
+    """Read the filtered patient frame from dcc.Store and normalise key dtypes."""
+
+    df = pd.read_json(StringIO(data_json), orient="split")
+
+    if "provider_code_current" in df.columns:
+        df["provider_code_current"] = _format_provider_code_current(
+            df["provider_code_current"]
+        )
+
+    if "period_end" in df.columns:
+        df["period_end"] = pd.to_datetime(df["period_end"], errors="coerce")
+
+    return df
+
+
 def create_metric_card(
     title: str, value: str, icon: str = "📊", color: str = "primary"
 ):
@@ -264,6 +302,10 @@ def create_filter_section():
             if idx in {0, default_end_idx} or d.month == 4:
                 marks[idx] = d.strftime("%b %Y")
 
+    demand_percentile_options = [
+        {"label": f"{p}%", "value": p} for p in range(50, 101, 5)
+    ]
+
     return dbc.Row(
         [
             dbc.Col(
@@ -306,7 +348,7 @@ def create_filter_section():
                         className="align-items-center g-2",
                     )
                 ],
-                width=5,
+                width=4,
             ),
             dbc.Col(
                 [
@@ -329,7 +371,33 @@ def create_filter_section():
                         className="align-items-center g-2",
                     )
                 ],
-                width=5,
+                width=4,
+            ),
+            dbc.Col(
+                [
+                    dbc.Row(
+                        [
+                            dbc.Col(
+                                html.Label(
+                                    "Demand Percentile:",
+                                    className="fw-bold",
+                                ),
+                                width="auto",
+                            ),
+                            dbc.Col(
+                                dcc.Dropdown(
+                                    id="demand-percentile-dropdown",
+                                    options=demand_percentile_options,
+                                    value=60,
+                                    clearable=False,
+                                ),
+                                width=True,
+                            ),
+                        ],
+                        className="align-items-center g-2",
+                    )
+                ],
+                width=2,
             ),
             dbc.Col(
                 [
@@ -1066,9 +1134,29 @@ def filter_data(n_clicks, slider_range, slider_dates, service_lines):
             pass
 
     if service_lines:
-        # Users select service labels, but we filter by provider code only.
-        selected_providers = sorted({item.split("|")[0] for item in service_lines})
-        df = df[df["provider_code_current"].astype(str).isin(selected_providers)]
+        # Filter by the selected (provider_code_current, service_line) pairs.
+        selected_pairs = set()
+        for item in service_lines:
+            try:
+                provider, service = str(item).split("|", 1)
+                selected_pairs.add((provider, service))
+            except Exception:
+                continue
+
+        if selected_pairs:
+            provider_series = df["provider_code_current"].astype(str)
+            service_series = df["service_line"].astype(str)
+            mask = [
+                (p, s) in selected_pairs
+                for p, s in zip(provider_series, service_series)
+            ]
+            df = df[pd.Series(mask, index=df.index)]
+
+    # Ensure provider codes remain canonical before writing to the store.
+    if "provider_code_current" in df.columns:
+        df["provider_code_current"] = _format_provider_code_current(
+            df["provider_code_current"]
+        )
 
     # Store as JSON
     return df.to_json(date_format="iso", orient="split")
@@ -1118,7 +1206,7 @@ def update_summary_stats(data_json):
     if data_json is None or data_handler is None:
         return html.Div("No data available", className="alert alert-warning")
 
-    df = pd.read_json(StringIO(data_json), orient="split")
+    df = _read_filtered_store_frame(data_json)
 
     if df.empty:
         return html.Div(
@@ -1126,7 +1214,7 @@ def update_summary_stats(data_json):
         )
 
     # Ensure period_end is datetime
-    df["period_end"] = pd.to_datetime(df["period_end"])
+    df["period_end"] = pd.to_datetime(df["period_end"], errors="coerce")
 
     # Calculate metrics across the entire selected date range
     total_referrals = int(df["referrals"].sum())
@@ -1206,10 +1294,9 @@ def update_footer(data_json):
     if data_json is None or data_handler is None:
         latest_period_end = "N/A"
     else:
-        df = pd.read_json(StringIO(data_json), orient="split")
+        df = _read_filtered_store_frame(data_json)
 
-        if not df.empty:
-            df["period_end"] = pd.to_datetime(df["period_end"])
+        if not df.empty and "period_end" in df.columns:
             latest_period_end = df["period_end"].max().strftime("%d %B %Y")
         else:
             latest_period_end = "N/A"
@@ -1248,9 +1335,7 @@ def update_tab_content(active_tab, data_json):
             className="alert alert-info",
         )
 
-    df = pd.read_json(StringIO(data_json), orient="split")
-
-    df["period_end"] = pd.to_datetime(df["period_end"])
+    df = _read_filtered_store_frame(data_json)
 
     if df.empty:
         return html.Div(
@@ -1421,9 +1506,9 @@ def _waiters_18wk_breakdown_figure(
     )
 
     # Use a real date x-axis so we can control tick density.
-    x_dates = pd.PeriodIndex(waiters_18wk["year_month"].astype(str), freq="M").to_timestamp(
-        "M"
-    )
+    x_dates = pd.PeriodIndex(
+        waiters_18wk["year_month"].astype(str), freq="M"
+    ).to_timestamp("M")
 
     fig = go.Figure()
     fig.add_trace(
@@ -1501,10 +1586,10 @@ def _waiters_18wk_breakdown_figure(
 def update_overview_keymetrics_timeseries(data_json, forecast_on, visible_metrics):
     if data_json is None:
         return go.Figure()
-    df = pd.read_json(StringIO(data_json), orient="split")
+    df = _read_filtered_store_frame(data_json)
     if df.empty:
         return go.Figure()
-    df["period_end"] = pd.to_datetime(df["period_end"])
+    df["period_end"] = pd.to_datetime(df["period_end"], errors="coerce")
     visible_set = set(visible_metrics or ["referrals", "clock_stop_actuals"])
     return _overview_key_metrics_figure(
         df=df,
@@ -1574,10 +1659,10 @@ def update_overview_keymetrics_visible_metrics(restyle_data, fig, current_visibl
 def update_referrals_timeseries(data_json, forecast_on):
     if data_json is None:
         return go.Figure()
-    df = pd.read_json(StringIO(data_json), orient="split")
+    df = _read_filtered_store_frame(data_json)
     if df.empty:
         return go.Figure()
-    df["period_end"] = pd.to_datetime(df["period_end"])
+    df["period_end"] = pd.to_datetime(df["period_end"], errors="coerce")
     return _metric_timeseries_figure(
         df=df,
         metric="referrals",
@@ -1595,10 +1680,10 @@ def update_referrals_timeseries(data_json, forecast_on):
 def update_waiters_timeseries(data_json, forecast_on):
     if data_json is None:
         return go.Figure()
-    df = pd.read_json(StringIO(data_json), orient="split")
+    df = _read_filtered_store_frame(data_json)
     if df.empty:
         return go.Figure()
-    df["period_end"] = pd.to_datetime(df["period_end"])
+    df["period_end"] = pd.to_datetime(df["period_end"], errors="coerce")
     return _metric_timeseries_figure(
         df=df,
         metric="waiters",
@@ -1616,10 +1701,10 @@ def update_waiters_timeseries(data_json, forecast_on):
 def update_caseload_timeseries(data_json, forecast_on):
     if data_json is None:
         return go.Figure()
-    df = pd.read_json(StringIO(data_json), orient="split")
+    df = _read_filtered_store_frame(data_json)
     if df.empty:
         return go.Figure()
-    df["period_end"] = pd.to_datetime(df["period_end"])
+    df["period_end"] = pd.to_datetime(df["period_end"], errors="coerce")
     return _metric_timeseries_figure(
         df=df,
         metric="caseload",
@@ -1637,10 +1722,10 @@ def update_caseload_timeseries(data_json, forecast_on):
 def update_contacts_timeseries(data_json, forecast_on):
     if data_json is None:
         return go.Figure()
-    df = pd.read_json(StringIO(data_json), orient="split")
+    df = _read_filtered_store_frame(data_json)
     if df.empty:
         return go.Figure()
-    df["period_end"] = pd.to_datetime(df["period_end"])
+    df["period_end"] = pd.to_datetime(df["period_end"], errors="coerce")
     return _metric_timeseries_figure(
         df=df,
         metric="total_contacts",
@@ -1661,10 +1746,10 @@ def update_contacts_timeseries(data_json, forecast_on):
 def update_discharges_timeseries(data_json, forecast_on):
     if data_json is None:
         return go.Figure()
-    df = pd.read_json(StringIO(data_json), orient="split")
+    df = _read_filtered_store_frame(data_json)
     if df.empty:
         return go.Figure()
-    df["period_end"] = pd.to_datetime(df["period_end"])
+    df["period_end"] = pd.to_datetime(df["period_end"], errors="coerce")
     return _metric_timeseries_figure(
         df=df,
         metric="discharges_with_clock_stop",
@@ -1685,39 +1770,25 @@ def create_service_line_summary_table(df: pd.DataFrame):
         A Dash DataTable where rows are (provider_code_current, service_line) and
         numeric metrics are aggregated by sum.
     """
-    exclude_cols = {
-        # Keep these as identifier columns rather than aggregated numeric metrics
-        "provider_code_current",
-        "service_line",
-        "period_end",
-        "year",
-        "month",
-        "quarter",
-    }
-
-    summary_columns = [
-        col
-        for col in df.columns
-        if col not in exclude_cols and pd.api.types.is_numeric_dtype(df[col])
-    ]
-
-    summary_df = (
-        df.groupby(["provider_code_current", "service_line"])[summary_columns]
-        .sum()
-        .reset_index()
-        .round(0)
-        .sort_values(["provider_code_current", "service_line"])
-    )
+    summary_df = _build_demand_summary_table_frame(df, demand_percentile=60)
 
     return dash_table.DataTable(
         id="patient-summary-table",
         data=summary_df.to_dict("records"),
         columns=[
-            {"name": prettify_column_name(i), "id": i} for i in summary_df.columns
+            {
+                "name": ("Period" if i == "period_end" else prettify_column_name(i)),
+                "id": i,
+            }
+            for i in summary_df.columns
         ],
         fixed_rows={"headers": True},
         fixed_columns={"headers": True, "data": 2},
         sort_action="native",
+        sort_by=[
+            {"column_id": "provider_code_current", "direction": "asc"},
+            {"column_id": "period_end", "direction": "asc"},
+        ],
         style_table={
             "width": "100%",
             "minWidth": "100%",
@@ -1749,6 +1820,233 @@ def create_service_line_summary_table(df: pd.DataFrame):
             {"if": {"row_index": "odd"}, "backgroundColor": "rgb(248, 248, 248)"}
         ],
     )
+
+
+def _build_demand_summary_table_frame(
+    df: pd.DataFrame,
+    *,
+    demand_percentile: Optional[int | float] = 60,
+) -> pd.DataFrame:
+    """Build the Demand Analysis summary table frame with derived columns.
+
+        - Aggregates numeric metrics for each (service_line, period_end) so the table is
+            split correctly by month.
+        - Computes waiters under 18 weeks from waiters - waiters_over_18_weeks when
+            missing.
+    - Computes a clock stop target per service line based on the selected percentile
+      of historical monthly referrals (within the currently filtered dataset).
+    - Computes demand ratio metrics and contacts-per-caseload metrics.
+    """
+
+    if df is None or df.empty:
+        return pd.DataFrame(
+            columns=["provider_code_current", "service_line", "period_end"]
+        )
+
+    try:
+        p = float(demand_percentile) if demand_percentile is not None else 60.0
+    except Exception:
+        p = 60.0
+    p = max(50.0, min(100.0, p))
+
+    base = df.copy()
+    if "period_end" in base.columns:
+        base["period_end"] = pd.to_datetime(base["period_end"], errors="coerce")
+        # Normalise to month-end so multiple within-month dates don't create duplicates.
+        base["period_end"] = base["period_end"].dt.to_period("M").dt.to_timestamp("M")
+
+    exclude_cols = {
+        "provider_code_current",
+        "service_line",
+        "period_end",
+        "year",
+        "month",
+        "quarter",
+        "year_month",
+    }
+
+    numeric_cols: list[str] = [
+        col
+        for col in base.columns
+        if col not in exclude_cols and pd.api.types.is_numeric_dtype(base[col])
+    ]
+
+    # Aggregate: sums for counts/volumes, means for "average_*" fields.
+    agg: dict[str, str] = {}
+    for col in numeric_cols:
+        if str(col).startswith("average_"):
+            agg[col] = "mean"
+        else:
+            agg[col] = "sum"
+
+    group_keys = []
+    if "provider_code_current" in base.columns:
+        group_keys.append("provider_code_current")
+    group_keys.append("service_line")
+    if "period_end" in base.columns:
+        group_keys.append("period_end")
+
+    summary_df = base.groupby(group_keys).agg(agg).reset_index().sort_values(group_keys)
+
+    # -----------------------------
+    # Waiters under 18 weeks (computed if missing)
+    # -----------------------------
+    if {"waiters", "waiters_over_18_weeks"}.issubset(summary_df.columns):
+        calc_under_18 = pd.to_numeric(
+            summary_df["waiters"], errors="coerce"
+        ) - pd.to_numeric(summary_df["waiters_over_18_weeks"], errors="coerce")
+        if "waiters_under_18_weeks" in summary_df.columns:
+            summary_df["waiters_under_18_weeks"] = pd.to_numeric(
+                summary_df["waiters_under_18_weeks"], errors="coerce"
+            ).fillna(calc_under_18)
+        else:
+            summary_df["waiters_under_18_weeks"] = calc_under_18
+
+    # Clock Stop Target: percentile of historical monthly referrals for the service line.
+    # Target remains constant across periods within the table.
+    if {"service_line", "referrals", "period_end"}.issubset(base.columns):
+        ref_base = base[["service_line", "period_end", "referrals"]].copy()
+        ref_base["referrals"] = pd.to_numeric(ref_base["referrals"], errors="coerce")
+        monthly_referrals = (
+            ref_base.dropna(subset=["service_line", "period_end", "referrals"])
+            .groupby(["service_line", "period_end"], as_index=False)
+            .agg(referrals=("referrals", "sum"))
+        )
+        targets = monthly_referrals.groupby("service_line")["referrals"].quantile(
+            p / 100.0
+        )
+        summary_df["clock_stop_target"] = summary_df["service_line"].map(
+            targets.to_dict()
+        )
+    else:
+        summary_df["clock_stop_target"] = None
+
+    # -----------------------------
+    # Derived ratios and metrics
+    # -----------------------------
+    def _safe_divide(numer: pd.Series, denom: pd.Series) -> pd.Series:
+        numer_n = pd.to_numeric(numer, errors="coerce")
+        denom_n = pd.to_numeric(denom, errors="coerce")
+        out = numer_n / denom_n
+        out = out.where(denom_n > 0)
+        return out
+
+    if "clock_stop_actuals" in summary_df.columns:
+        summary_df["referral_clock_stop_ratio"] = _safe_divide(
+            summary_df["clock_stop_actuals"], summary_df["clock_stop_target"]
+        )
+    else:
+        summary_df["referral_clock_stop_ratio"] = None
+
+    if "discharges_no_clock_stop" in summary_df.columns:
+        summary_df["referral_discharged_no_clock_stop_ratio"] = _safe_divide(
+            summary_df["discharges_no_clock_stop"], summary_df["clock_stop_target"]
+        )
+    else:
+        summary_df["referral_discharged_no_clock_stop_ratio"] = None
+
+    summary_df["demand_ratio"] = pd.to_numeric(
+        summary_df["referral_clock_stop_ratio"], errors="coerce"
+    ) + pd.to_numeric(
+        summary_df["referral_discharged_no_clock_stop_ratio"], errors="coerce"
+    )
+
+    if {"total_caseload_contacts", "caseload"}.issubset(summary_df.columns):
+        summary_df["total_contacts_per_caseload"] = _safe_divide(
+            summary_df["total_caseload_contacts"], summary_df["caseload"]
+        )
+    else:
+        summary_df["total_contacts_per_caseload"] = None
+
+    if {"ftf_caseload_contacts", "caseload"}.issubset(summary_df.columns):
+        summary_df["ftf_contacts_per_caseload"] = _safe_divide(
+            summary_df["ftf_caseload_contacts"], summary_df["caseload"]
+        )
+    else:
+        summary_df["ftf_contacts_per_caseload"] = None
+
+    # Format/round for readability (keep ratios as decimals)
+    for col in summary_df.columns:
+        if col in {
+            "referral_clock_stop_ratio",
+            "referral_discharged_no_clock_stop_ratio",
+            "demand_ratio",
+            "total_contacts_per_caseload",
+            "ftf_contacts_per_caseload",
+        }:
+            summary_df[col] = pd.to_numeric(summary_df[col], errors="coerce").round(3)
+        elif col in {"clock_stop_target"}:
+            summary_df[col] = pd.to_numeric(summary_df[col], errors="coerce").round(0)
+
+    if "period_end" in summary_df.columns:
+        summary_df["period_end"] = pd.to_datetime(
+            summary_df["period_end"], errors="coerce"
+        ).dt.strftime("%Y-%m-%d")
+
+    # Column order as requested
+    preferred_order = [
+        "provider_code_current",
+        "service_line",
+        "period_end",
+        "referrals",
+        "clock_stop_target",
+        "clock_stop_actuals",
+        "waiters",
+        "waiters_over_18_weeks",
+        "waiters_under_18_weeks",
+        "caseload",
+        "total_caseload_contacts",
+        "ftf_caseload_contacts",
+        "total_contacts_per_caseload",
+        "ftf_contacts_per_caseload",
+        "total_contacts",
+        "ftf_contacts",
+        "average_length_of_treatment",
+        "average_contacts_at_discharge",
+        "average_ftf_contacts_at_discharge",
+        "discharges_no_clock_stop",
+        "discharges_with_clock_stop",
+        "referral_clock_stop_ratio",
+        "referral_discharged_no_clock_stop_ratio",
+        "demand_ratio",
+    ]
+    existing = [c for c in preferred_order if c in summary_df.columns]
+    remaining = [c for c in summary_df.columns if c not in existing]
+    return summary_df[existing + remaining]
+
+
+@app.callback(
+    [
+        Output("patient-summary-table", "data"),
+        Output("patient-summary-table", "columns"),
+    ],
+    [
+        Input("filtered-data-store", "data"),
+        Input("demand-percentile-dropdown", "value"),
+    ],
+)
+def update_patient_summary_table(data_json, demand_percentile):
+    """Recalculate Demand Analysis table metrics when filters change."""
+    if data_json is None:
+        return [], []
+
+    df = _read_filtered_store_frame(data_json)
+    if df.empty:
+        return [], []
+
+    summary_df = _build_demand_summary_table_frame(
+        df,
+        demand_percentile=demand_percentile,
+    )
+
+    columns = [
+        {
+            "name": ("Period" if i == "period_end" else prettify_column_name(i)),
+            "id": i,
+        }
+        for i in summary_df.columns
+    ]
+    return summary_df.to_dict("records"), columns
 
 
 def create_staffing_pivot_table(

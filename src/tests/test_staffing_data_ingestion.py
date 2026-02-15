@@ -67,15 +67,45 @@ class FakeSQLServerConnection:
     def connect(self):
         # Build a minimal dataset that aligns with EXPECTED_COLUMNS after normalisation
         columns = [
-            "staff",
-            "staff_group",
             "provider_code_current",
             "service_line",
+            "staff_group",
+            "staff",
         ]
 
         rows = [
-            (12, "Nursing", "001", "Adult Inpatients Acute"),
-            (8, "Medical", "001", "Adult Inpatients Acute"),
+            ("008", "Early Intervention Service", "Allied Health Professionals", 2),
+            (
+                "008",
+                "Early Intervention Service",
+                "Nursing and Midwifery Registered",
+                14,
+            ),
+        ]
+
+        return FakeConnection(rows, columns)
+
+    def close(self):
+        pass
+
+
+class FakeSQLServerConnectionNumericProviderCodes:
+    """Variant that returns numeric provider codes (e.g. 8, 10)."""
+
+    def __init__(self, _config_path=None):
+        pass
+
+    def connect(self):
+        columns = [
+            "provider_code_current",
+            "service_line",
+            "staff_group",
+            "staff",
+        ]
+
+        rows = [
+            (8, "Early Intervention Service", "Allied Health Professionals", 2),
+            (10, "Early Intervention Service", "Nursing and Midwifery Registered", 14),
         ]
 
         return FakeConnection(rows, columns)
@@ -88,13 +118,13 @@ class FakeSQLServerConnection:
 # Unit Test - Normalise Column Names
 # ---------------------------------------------------------------------
 def test_normalise_column_names():
-    cols = ["Staff_Group", "Service_Line", "ProviderCodeCurrent"]
+    cols = ["ProviderCodeCurrent", "Service_Line", "StaffGroup"]
     normalised = StaffingDataExtractor._normalise_column_names(cols)
 
     assert normalised == [
-        "staff_group",
-        "service_line",
         "provider_code_current",
+        "service_line",
+        "staff_group",
     ]
 
 
@@ -120,13 +150,26 @@ def test_extract_staffing_data_with_mocked_db(monkeypatch):
     assert len(df) == 2
 
     expected_cols = {
-        "staff",
-        "staff_group",
         "provider_code_current",
         "service_line",
+        "staff_group",
+        "staff",
     }
     assert set(df.columns) == expected_cols
-    assert df["staff"].sum() == 20
+    assert df["staff"].sum() == 16
+
+
+def test_extract_staffing_data_zero_pads_provider_codes(monkeypatch):
+    """Numeric ProviderCodeCurrent values should be canonicalised to 3 digits."""
+    monkeypatch.setattr(
+        "data_engineering.staffing_data_ingestion.SQLServerConnection",
+        FakeSQLServerConnectionNumericProviderCodes,
+    )
+
+    extractor = StaffingDataExtractor(run_quality_checks=False)
+    df = extractor.extract_staffing_data()
+
+    assert sorted(df["provider_code_current"].unique().tolist()) == ["008", "010"]
 
 
 # ---------------------------------------------------------------------
@@ -185,10 +228,16 @@ def test_load_staffing_data_reads_csv(tmp_path):
 
     df_in = pd.DataFrame(
         {
-            "staff": [10, 5],
-            "staff_group": ["Nursing", "Medical"],
-            "provider_code_current": ["001", "001"],
-            "service_line": ["Adult Inpatients Acute", "Adult Inpatients Acute"],
+            "provider_code_current": ["008", "008"],
+            "service_line": [
+                "Early Intervention Service",
+                "Early Intervention Service",
+            ],
+            "staff_group": [
+                "Allied Health Professionals",
+                "Nursing and Midwifery Registered",
+            ],
+            "staff": [2, 14],
         }
     )
     df_in.to_csv(test_file, index=False)
@@ -196,7 +245,7 @@ def test_load_staffing_data_reads_csv(tmp_path):
     df_out = load_staffing_data(test_file)
 
     assert len(df_out) == 2
-    assert df_out["staff"].sum() == 15
+    assert df_out["staff"].sum() == 16
 
 
 # ---------------------------------------------------------------------

@@ -142,6 +142,33 @@ class PatientDataExtractor:
         last_day_previous_month = first_of_month - timedelta(days=1)
         return pd.Timestamp(last_day_previous_month)
 
+    @staticmethod
+    def _format_provider_code_current(series: pd.Series) -> pd.Series:
+        """Normalise provider codes to a 3-digit string (e.g. 6 -> '006').
+
+        Notes:
+            - Handles ints/floats/strings.
+            - Leaves non-numeric values unchanged.
+            - Keeps nulls as <NA>.
+        """
+
+        if series is None:
+            return series
+
+        s = series.astype("string")
+        s = s.str.strip()
+
+        # Common CSV/DB artifacts: 6.0 -> 6
+        s = s.str.replace(r"\.0$", "", regex=True)
+
+        # Only pad purely numeric codes up to 3 digits.
+        is_digits = s.str.fullmatch(r"\d+", na=False)
+        within_3 = s.str.len().fillna(0).astype(int) <= 3
+        to_pad = is_digits & within_3
+
+        s = s.mask(to_pad, s.str.zfill(3))
+        return s
+
     # SQL query as class constant for better maintainability
     PATIENT_QUERY = """
 
@@ -843,6 +870,12 @@ class PatientDataExtractor:
             # Normalise column names
             df.columns = self._normalise_column_names(df.columns)
 
+            # Canonicalise provider code formatting at ingestion time
+            if "provider_code_current" in df.columns:
+                df["provider_code_current"] = self._format_provider_code_current(
+                    df["provider_code_current"]
+                )
+
             # Convert period_end to datetime
             if "period_end" in df.columns:
                 df["period_end"] = pd.to_datetime(df["period_end"])
@@ -986,7 +1019,20 @@ def load_patient_data(csv_path: Optional[str] = None) -> pd.DataFrame:
         raise FileNotFoundError(f"Patient data file not found at: {csv_path}")
 
     logger.info(f"📂 Loading data from: {csv_path}")
-    df = pd.read_csv(csv_path, parse_dates=["period_end"])
+
+    # IMPORTANT: preserve leading zeros for provider_code_current
+    df = pd.read_csv(
+        csv_path,
+        parse_dates=["period_end"],
+        dtype={"provider_code_current": "string"},
+    )
+
+    if "provider_code_current" in df.columns:
+        df["provider_code_current"] = (
+            PatientDataExtractor._format_provider_code_current(
+                df["provider_code_current"]
+            )
+        )
     logger.info(f"✅ Loaded {len(df):,} records with {len(df.columns)} columns")
 
     return df
