@@ -1,6 +1,6 @@
 # NHFT Demand Capacity Platform
 
-A configurable Demand and Capacity Modelling Platform for NHFT, featuring automated data pipelines, statistical forecasting, capacity modelling, simulation, and an interactive Dash interface. Developed for the ZDAT3001 Work-Based Project to support data-driven operational planning.
+A configurable Demand and Capacity analytics platform for NHFT, featuring automated data ingestion (to standardised CSV extracts), statistical forecasting utilities, and an interactive Dash interface. Developed for the ZDAT3001 Work-Based Project to support data-driven operational planning.
 
 
 ## 1. Overview
@@ -10,10 +10,10 @@ This project develops a Demand and Capacity Modelling Platform for Northamptonsh
 The platform integrates:
 
 - Automated data ingestion and validation
-- Statistical and machine learning forecasting (ARIMA, ETS, Gradient Boosting)
-- Capacity modelling using service templates and staffing parameters
-- Queueing theory and discrete-event simulation using SimPy
-- An interactive Dash application for scenario exploration
+- Statistical forecasting (dashboard default: ETS / Holt-Winters exponential smoothing)
+- Interactive Dash application for demand & capacity exploration
+
+Planned / in-progress workstreams (see Project Status) include capacity modelling templates and simulation.
 
 ## 2. Problem Statement
 
@@ -23,7 +23,7 @@ The project asks:
 
 How can NHFT accurately forecast service demand and optimise capacity allocation using existing data sources, ensuring consistency, fairness, and operational efficiency across multiple service types?
 
-This question is informed by the Scientific Approach and background analysis detailed in the Project Approach document .
+This question is informed by the Scientific Approach and background analysis detailed in the Project Approach document.
 
 ## 3. Project Objectives
 
@@ -37,24 +37,25 @@ As specified in the Project Agreement (pp. 2–3) , the project will deliver a p
 
 ## 4. Key Features
 ### 4.1 Automated Data Engineering Pipeline
-- Direct SQL Server querying (no local file storage)
-- Data validation, profiling, and pseudonymisation
-- Reproducible transformation steps following governance standards
+- SQL extraction + reproducible transformation steps
+- Column name normalisation to `snake_case` for consistent downstream use
+- Data validation / quality checks
+- Output datasets written to `data/patient_data.csv` and `data/staffing_data.csv` for the dashboard and analysis modules
 
 ### 4.2 Forecasting Engine
-Implements multiple models including:
+Current dashboard implementation uses:
 
-- ARIMA
-- Exponential Smoothing (ETS)
-- Gradient Boosting
-- Model selection using MAE/RMSE and fairness metrics
+- Exponential Smoothing (ETS / Holt-Winters), with optional 12-month forecasts and 95% confidence intervals
+- Archived SARIMA utilities are retained under `src/forecasting/archived_sarima/` for reference/offline use
 
-### 4.3 Capacity Modelling
+Planned: broader model benchmarking and selection (e.g., ML approaches) once evaluation requirements are finalised.
+
+### 4.3 Capacity Modelling (planned / in progress)
 
 - Service templates (community, outpatient, mental health)
 - Configurable staff availability, rosters, DNA rates, and constraints
 
-### 4.4 Queueing & Simulation Module
+### 4.4 Queueing & Simulation Module (planned / in progress)
 
 - M/M/s, M/G/s queueing systems
 - Discrete-event simulation using SimPy
@@ -63,20 +64,44 @@ Implements multiple models including:
 ### 4.5 Dash Application
 
 - Interactive visual dashboards
-- Tabs for forecasts, capacity utilisation, and simulation outputs
-- Scenario controls (sliders, toggles, drop-downs)
+- Tabs for Overview, Demand Analysis, and Capacity Analysis
+- Controls: date-range slider, service selection, percentile-based demand target setting, and per-chart forecast toggles
 - Accessible, interpretable design for operational managers
+
+For the current UI behaviour and data expectations, see `src/dashboard/README.md`.
+
+### 4.6 Data Limitations, Triangulation, and Capacity Approach
+
+During delivery two practical constraints were identified that materially shape the modelling approach:
+
+- **No historical workforce time series available:** due to extraction limitations, historical staffing/workforce data was not obtainable at the required grain. The staffing dataset available to this project is therefore a **current snapshot only** (no month-by-month staffing history).
+- **Staff vs patient “service line” misalignment:** patient activity and workforce data do not naturally align by service line because service definitions are represented differently across systems (e.g., **service lines vs cost centres / organisational hierarchies**). This project is a strong demonstration of why naive joins can be misleading.
+
+This mismatch has been documented and shared with senior stakeholders to support future improvements in data triangulation and service mapping.
+
+As a result:
+
+- A “naturally merging” staff capacity model (that joins cleanly to demand at the same service-line grain over time) is **not feasible** with the currently available workforce extract.
+- The **Capacity** area of the dashboard is implemented as a **reference view** (staff mix, staff by service line, and staff vs latest caseload), providing context rather than a fully time-aligned capacity model.
+- The project therefore focuses on **demand-based benchmarking** using **demand percentiles**:
+    - the dashboard computes a service-line **Clock Stop Target** as a chosen percentile of historical monthly referrals within the selected filter window
+    - derived demand ratios then allow demand to be compared against that target, while the staffing snapshot provides contextual capacity signals (e.g., staff-per-100-caseload at latest period)
 
 ## 5. Repository Structure
 ```plaintext
-nhft-demand-capacity-modelling-platform/
+NHFT-Demand-Capacity-Platform/
 ├── docs/
-│   ├── Ethical-and-Legal-Assessment.pdf
-│   ├── Project-Agreement.pdf
-│   ├── Project-Approach.pdf
-│   ├── Project-Plan.pdf
-│   ├── Project-Methodology.pdf
-│   └── DPIA/
+│   ├── Ethical and Legal Assessment.pdf
+│   ├── Project Agreement.pdf
+│   ├── Project Approach.pdf
+│   ├── Project Plan.pdf
+│   ├── Project Methodology.pdf
+│   └── DPIA Assessment.pdf
+│
+├── data/
+│   ├── patient_data.csv
+│   ├── staffing_data.csv
+│   └── last_refreshed.json
 │
 ├── src/
 │   ├── analysis/
@@ -95,23 +120,26 @@ nhft-demand-capacity-modelling-platform/
 │   │   ├── staffing_data_ingestion.py
 │   │   └── README.md
 │   │
-│   └── forecasting/
-│       ├── README.md
-│       ├── __init__.py
-│       ├── preprocessing.py
-│       ├── forecast.py
-│       ├── ets.py
-│       ├── ets_report.py
-│       └── archived_sarima/
-│           ├── __init__.py
-│           ├── sarima.py
-│           └── sarima_report.py
+│   ├── forecasting/
+│   │   ├── README.md
+│   │   ├── __init__.py
+│   │   ├── preprocessing.py
+│   │   ├── forecast.py
+│   │   ├── ets.py
+│   │   ├── ets_report.py
+│   │   └── archived_sarima/
+│   │       ├── __init__.py
+│   │       ├── sarima.py
+│   │       └── sarima_report.py
 │
-├── tests/
-│   ├── test_patient_data_ingestion.py
-│   ├── test_sql_connection.py
-│   ├── test_staffing_data_ingestion.py
-│   └── test_forecasting.py
+│   ├── sql/
+│   │   ├── capacity_data_extraction_query.sql
+│   │   └── demand_data_extraction_query.sql
+│
+│   └── tests/
+│       ├── test_patient_data_ingestion.py
+│       ├── test_sql_connection.py
+│       └── test_staffing_data_ingestion.py
 │
 ├── .gitignore
 ├── config.ini
@@ -150,34 +178,51 @@ A Data Protection Impact Assessment (DPIA) will be completed before processing b
 
 ## 8. Installation
 Clone the repository:
-- git clone <https://github.com/Hafeji1992/NHFT-Demand-Capacity-Platform>
-- cd nhft-demand-capacity-modelling-platform
+
+```bash
+git clone https://github.com/Hafeji1992/NHFT-Demand-Capacity-Platform
+cd NHFT-Demand-Capacity-Platform
+```
 
 Install dependencies:
+
+```bash
 pip install -r requirements.txt
+```
 
 **Note: This project must run inside the NHFT secure environment due to data governance constraints.**
 
 ## 9. Running the Dashboard
 
-To launch the Dash application: python src/dashboard/app.py
+1) (Optional) Refresh extracts (writes to `data/`):
 
-The app includes: 
-- Forecast visualisation
-- Capacity scenarios
-- Simulation outputs
-- Service profiling tools
+```bash
+python src/data_engineering/master_data_ingestion.py
+```
+
+2) Launch the Dash application:
+
+```bash
+python src/dashboard/app.py
+```
+
+The app currently includes:
+- Filtered demand metrics + KPIs
+- Demand and capacity summary tables
+- Optional ETS forecast overlays on selected charts
+- Percentile-based demand targets and derived demand ratios for service-line benchmarking
 
 ## 10. Testing
 
-Unit tests are included for:
-- Data pipeline integrity
-- Forecasting accuracy
-- Simulation stability
+Unit tests are currently included for:
+- Data pipeline integrity (ingestion)
+- SQL connectivity checks
 
 Run tests using:
 
-pytest tests/
+```bash
+pytest src/tests/
+```
 
 ## 11. Stakeholders
 
@@ -195,9 +240,9 @@ As defined in the Project Plan (Section 2, p. 1) :
 | Project Documentation & Governance     | ✅ Completed | Early Dec 2025    | 08/12/2025      | 30          | Project Agreement, Plan, Methodology, Ethics & Legal all completed |
 | Data Access & Infrastructure Setup     | ✅ Completed | Mid Dec 2025      | 15/12/2025      | 15          | SQL access, governance approvals, secure Python environment |
 | Data Engineering & Automation Pipeline | ✅ Completed | Early Jan 2026    | 22/12/2025      | 30          | Direct-query pipeline, validation scripts, staffing & demand ingestion |
-| Forecasting Module (MVP)               | 📁 In Progress  | Early Feb 2026    | —               | —           | ARIMA/ETS/XGB models and selection logic |
+| Forecasting Module (MVP)               | ✅ Completed  | Early Feb 2026    | 09/02/2026     | 97.5         | ETS forecasting utilities (dashboard default) + SARIMA retained under archived utilities |
 | Capacity & Simulation Module           | ⏳ Upcoming  | Mid Feb 2026      | —               | —           | Queueing and simulation with SimPy |
-| Dash Application Development           | 📁 In Progress  | End Feb 2026      | —               | 15           | Interactive dashboard with scenarios |
+| Dash Application Development           | 📁 In Progress  | End Feb 2026      | —               | 30           | Interactive dashboard (Overview/Demand/Capacity tabs, filters, percentile-based targets, derived tables, ETS forecast toggles; staffing snapshot used as reference) |
 | Testing, Validation & Refinement       | ⏳ Upcoming  | End Feb 2026      | —               | —           | Forecast evaluation, stakeholder testing |
 | Documentation & Final Presentation Prep| ⏳ Upcoming  | June 2026         | —               | —           | Written portfolio, slides, video pitch |
 
@@ -222,6 +267,8 @@ Thanks to:
 
 ## 15. Project Flow Diagram
 
+Note: this diagram represents the target architecture across workstreams (some modules are planned / in-progress).
+
 ```mermaid
 flowchart TD
 
@@ -241,10 +288,9 @@ flowchart TD
     end
 
     subgraph Forecasting_Engine
-        ARIMA[ARIMA Model]
-        ETS[ETS Model]
-        XGB[Gradient Boosting]
-        ModelSelect[Model Selection]
+        ETS[ETS Model (dashboard)]
+        SARIMA[Archived SARIMA]
+        ModelSelect[Spec Selection (AIC)]
     end
 
     subgraph Demand_Modelling
