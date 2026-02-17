@@ -50,18 +50,22 @@ Current dashboard implementation uses:
 
 Planned: broader model benchmarking and selection (e.g., ML approaches) once evaluation requirements are finalised.
 
-### 4.3 Capacity Modelling (planned / in progress)
+### 4.3 Capacity Modelling (reference-only in current MVP)
 
-- Service templates (community, outpatient, mental health)
-- Configurable staff availability, rosters, DNA rates, and constraints
+Due to workforce extraction constraints and service mapping misalignment (service lines vs cost centres / org structures), the project does not currently have the inputs needed for a time-aligned capacity model that cleanly merges with demand.
 
-### 4.4 Queueing & Simulation Module (planned / in progress)
+Current capability focuses on capacity as **context** rather than a merged model:
 
-- M/M/s, M/G/s queueing systems
-- Discrete-event simulation using SimPy
-- Scenario analysis for staffing, demand variation, and breach risk detection
+- Staffing is treated as a **current snapshot** (no historical staffing time series).
+- Capacity outputs are presented as a **reference view** in the dashboard (staff mix, staff by service line, staff vs latest caseload) to support triangulation discussions.
+- Demand-to-capacity evaluation is handled via **demand-based benchmarking** (percentile-derived targets and derived demand ratios) rather than a merged staffing model.
 
-### 4.5 Dash Application
+Future enhancement (dependent on improved workforce history + mapping):
+
+- Service templates and configurable capacity parameters (availability, rosters, DNAs, constraints)
+- Time-indexed capacity baselines to enable proper demand–capacity joins and scenarios
+
+### 4.4 Dash Application
 
 - Interactive visual dashboards
 - Tabs for Overview, Demand Analysis, and Capacity Analysis
@@ -70,7 +74,7 @@ Planned: broader model benchmarking and selection (e.g., ML approaches) once eva
 
 For the current UI behaviour and data expectations, see `src/dashboard/README.md`.
 
-### 4.6 Data Limitations, Triangulation, and Capacity Approach
+### 4.5 Data Limitations, Triangulation, and Capacity Approach
 
 During delivery two practical constraints were identified that materially shape the modelling approach:
 
