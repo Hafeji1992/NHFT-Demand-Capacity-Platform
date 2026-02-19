@@ -17,6 +17,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import pandas as pd
+import numpy as np
 
 from data_handler import get_data_handler, DataHandler
 
@@ -235,6 +236,433 @@ def _rgba(color: str, alpha: float) -> str:
 
     # Fallback: keep a neutral band if we can't parse
     return f"rgba(0,0,0,{a})"
+
+
+def _format_int_card_value(value: Optional[float]) -> str:
+    """Format a numeric KPI value for display, or return 'N/A'."""
+
+    if value is None:
+        return "N/A"
+    try:
+        if pd.isna(value):
+            return "N/A"
+    except Exception:
+        pass
+    try:
+        return f"{int(round(float(value))):,}"
+    except Exception:
+        return "N/A"
+
+
+def _format_ratio_card_value(value: Optional[float], *, decimals: int = 3) -> str:
+    """Format a ratio KPI value for display, or return 'N/A'."""
+
+    if value is None:
+        return "N/A"
+    try:
+        if pd.isna(value):
+            return "N/A"
+    except Exception:
+        pass
+
+    try:
+        x = float(value)
+    except Exception:
+        return "N/A"
+
+    if not np.isfinite(x):
+        return "N/A"
+
+    d = max(0, int(decimals))
+    return f"{x:.{d}f}"
+
+
+def _format_percent_card_value(value: Optional[float], *, decimals: int = 1) -> str:
+    """Format a proportion (0..1) as a percentage for KPI display, or 'N/A'."""
+
+    if value is None:
+        return "N/A"
+    try:
+        if pd.isna(value):
+            return "N/A"
+    except Exception:
+        pass
+
+    try:
+        x = float(value)
+    except Exception:
+        return "N/A"
+
+    if not np.isfinite(x):
+        return "N/A"
+
+    d = max(0, int(decimals))
+    return f"{x * 100:.{d}f}%"
+
+
+def _format_signed_int_card_value(value: Optional[float]) -> str:
+    """Format a signed integer KPI value for display, or return 'N/A'."""
+
+    if value is None:
+        return "N/A"
+    try:
+        if pd.isna(value):
+            return "N/A"
+    except Exception:
+        pass
+
+    try:
+        x = float(value)
+    except Exception:
+        return "N/A"
+
+    if not np.isfinite(x):
+        return "N/A"
+
+    n = int(round(x))
+    if n > 0:
+        return f"+{n:,}"
+    return f"{n:,}"
+
+
+def _compute_net_caseload_flow_latest(df: pd.DataFrame) -> Optional[float]:
+    """Compute latest-month net flow = inflow - outflow.
+
+    Inflow:
+      - referrals (sum)
+    Outflow (first available):
+      - discharges_with_clock_stop + discharges_no_clock_stop (if both exist)
+      - discharges_with_clock_stop (if only this exists)
+      - clock_stop_actuals (fallback if discharge fields are absent)
+    """
+
+    if df is None or df.empty:
+        return None
+
+    base = df.copy()
+    if "period_end" not in base.columns:
+        return None
+
+    base["period_end"] = pd.to_datetime(base["period_end"], errors="coerce")
+    base = base.dropna(subset=["period_end"])
+    if base.empty:
+        return None
+
+    base["period_end"] = base["period_end"].dt.to_period("M").dt.to_timestamp("M")
+    latest_period_end = base["period_end"].max()
+    if pd.isna(latest_period_end):
+        return None
+
+    if "referrals" not in base.columns:
+        return None
+
+    latest = base[base["period_end"] == latest_period_end].copy()
+    if latest.empty:
+        return None
+
+    inflow = pd.to_numeric(latest["referrals"], errors="coerce").sum(skipna=True)
+
+    has_with = "discharges_with_clock_stop" in latest.columns
+    has_no = "discharges_no_clock_stop" in latest.columns
+    if has_with and has_no:
+        outflow = pd.to_numeric(
+            latest["discharges_with_clock_stop"], errors="coerce"
+        ).sum(skipna=True) + pd.to_numeric(
+            latest["discharges_no_clock_stop"], errors="coerce"
+        ).sum(
+            skipna=True
+        )
+    elif has_with:
+        outflow = pd.to_numeric(
+            latest["discharges_with_clock_stop"], errors="coerce"
+        ).sum(skipna=True)
+    elif "clock_stop_actuals" in latest.columns:
+        outflow = pd.to_numeric(latest["clock_stop_actuals"], errors="coerce").sum(
+            skipna=True
+        )
+    else:
+        return None
+
+    if not np.isfinite(inflow) or not np.isfinite(outflow):
+        return None
+
+    return float(inflow) - float(outflow)
+
+
+def _compute_caseload_throughput_rate_latest(df: pd.DataFrame) -> Optional[float]:
+    """Compute latest-month caseload throughput rate = outflow / caseload.
+
+    Interprets outflow in the same way as Net Caseload Flow:
+      - discharges_with_clock_stop + discharges_no_clock_stop (preferred)
+      - discharges_with_clock_stop
+      - clock_stop_actuals (fallback)
+    """
+
+    if df is None or df.empty:
+        return None
+
+    base = df.copy()
+    if "period_end" not in base.columns:
+        return None
+
+    base["period_end"] = pd.to_datetime(base["period_end"], errors="coerce")
+    base = base.dropna(subset=["period_end"])
+    if base.empty:
+        return None
+
+    base["period_end"] = base["period_end"].dt.to_period("M").dt.to_timestamp("M")
+    latest_period_end = base["period_end"].max()
+    if pd.isna(latest_period_end):
+        return None
+
+    if "caseload" not in base.columns:
+        return None
+
+    latest = base[base["period_end"] == latest_period_end].copy()
+    if latest.empty:
+        return None
+
+    caseload = pd.to_numeric(latest["caseload"], errors="coerce").sum(skipna=True)
+    if not np.isfinite(caseload) or float(caseload) <= 0:
+        return None
+
+    has_with = "discharges_with_clock_stop" in latest.columns
+    has_no = "discharges_no_clock_stop" in latest.columns
+    if has_with and has_no:
+        outflow = pd.to_numeric(
+            latest["discharges_with_clock_stop"], errors="coerce"
+        ).sum(skipna=True) + pd.to_numeric(
+            latest["discharges_no_clock_stop"], errors="coerce"
+        ).sum(
+            skipna=True
+        )
+    elif has_with:
+        outflow = pd.to_numeric(
+            latest["discharges_with_clock_stop"], errors="coerce"
+        ).sum(skipna=True)
+    elif "clock_stop_actuals" in latest.columns:
+        outflow = pd.to_numeric(latest["clock_stop_actuals"], errors="coerce").sum(
+            skipna=True
+        )
+    else:
+        return None
+
+    if not np.isfinite(outflow) or float(outflow) < 0:
+        return None
+
+    return float(outflow) / float(caseload)
+
+
+def _compute_demand_ratio_latest(
+    df: pd.DataFrame,
+    *,
+    demand_percentile: Optional[int | float] = 60,
+) -> Optional[float]:
+    """Compute latest-month Demand Ratio using the dashboard's target framework."""
+
+    if df is None or df.empty:
+        return None
+
+    base = df.copy()
+    if "period_end" not in base.columns:
+        return None
+
+    base["period_end"] = pd.to_datetime(base["period_end"], errors="coerce")
+    base = base.dropna(subset=["period_end"])
+    if base.empty:
+        return None
+
+    base["period_end"] = base["period_end"].dt.to_period("M").dt.to_timestamp("M")
+    latest_period_end = base["period_end"].max()
+    if pd.isna(latest_period_end):
+        return None
+
+    required = {
+        "service_line",
+        "referrals",
+        "clock_stop_actuals",
+        "discharges_no_clock_stop",
+    }
+    if not required.issubset(set(base.columns)):
+        return None
+
+    try:
+        p = float(demand_percentile) if demand_percentile is not None else 60.0
+    except Exception:
+        p = 60.0
+    p = max(50.0, min(100.0, p))
+
+    # Compute clock stop target per service line from historical monthly referrals.
+    ref_base = base[["service_line", "period_end", "referrals"]].copy()
+    ref_base["referrals"] = pd.to_numeric(ref_base["referrals"], errors="coerce")
+    monthly_referrals = (
+        ref_base.dropna(subset=["service_line", "period_end", "referrals"])
+        .groupby(["service_line", "period_end"], as_index=False)
+        .agg(referrals=("referrals", "sum"))
+    )
+    if monthly_referrals.empty:
+        return None
+
+    targets = monthly_referrals.groupby("service_line")["referrals"].quantile(p / 100.0)
+    targets_map = targets.to_dict()
+
+    latest = base[base["period_end"] == latest_period_end].copy()
+    if latest.empty:
+        return None
+
+    latest["clock_stop_actuals"] = pd.to_numeric(
+        latest["clock_stop_actuals"], errors="coerce"
+    )
+    latest["discharges_no_clock_stop"] = pd.to_numeric(
+        latest["discharges_no_clock_stop"], errors="coerce"
+    )
+
+    by_service = latest.groupby("service_line", as_index=False).agg(
+        clock_stop_actuals=("clock_stop_actuals", "sum"),
+        discharges_no_clock_stop=("discharges_no_clock_stop", "sum"),
+    )
+    by_service["clock_stop_target"] = by_service["service_line"].map(targets_map)
+    by_service["clock_stop_target"] = pd.to_numeric(
+        by_service["clock_stop_target"], errors="coerce"
+    )
+    by_service = by_service.dropna(subset=["clock_stop_target"])
+    by_service = by_service[by_service["clock_stop_target"] > 0]
+    if by_service.empty:
+        return None
+
+    numer = (
+        pd.to_numeric(by_service["clock_stop_actuals"], errors="coerce").fillna(0)
+        + pd.to_numeric(by_service["discharges_no_clock_stop"], errors="coerce").fillna(
+            0
+        )
+    ).sum()
+    denom = pd.to_numeric(by_service["clock_stop_target"], errors="coerce").sum()
+
+    if not np.isfinite(numer) or not np.isfinite(denom) or float(denom) <= 0:
+        return None
+
+    out = float(numer) / float(denom)
+    if not np.isfinite(out):
+        return None
+    return out
+
+
+def _compute_sustainable_caseload_latest(
+    df: pd.DataFrame,
+    *,
+    demand_percentile: Optional[int | float] = 60,
+) -> Optional[float]:
+    """Estimate sustainable caseload (latest month) assuming Demand Ratio = 1.0.
+
+    Uses the same Demand Ratio framework as the Demand table:
+      - clock_stop_target is a percentile of historical monthly referrals per service line
+        within the currently filtered dataset.
+      - demand_ratio is derived from clock_stop_actuals and discharges_no_clock_stop
+        relative to that target.
+
+    The card returns a single value:
+      sustainable_caseload = latest_month_caseload / latest_month_demand_ratio
+    where latest_month_demand_ratio is computed as:
+      (sum(clock_stop_actuals) + sum(discharges_no_clock_stop)) / sum(clock_stop_target)
+    across service lines with valid targets.
+    """
+
+    if df is None or df.empty:
+        return None
+
+    base = df.copy()
+    if "period_end" not in base.columns:
+        return None
+
+    base["period_end"] = pd.to_datetime(base["period_end"], errors="coerce")
+    base = base.dropna(subset=["period_end"])
+    if base.empty:
+        return None
+
+    base["period_end"] = base["period_end"].dt.to_period("M").dt.to_timestamp("M")
+    latest_period_end = base["period_end"].max()
+    if pd.isna(latest_period_end):
+        return None
+
+    # Inputs required to compute target + demand ratio.
+    required = {
+        "service_line",
+        "referrals",
+        "clock_stop_actuals",
+        "discharges_no_clock_stop",
+        "caseload",
+    }
+    if not required.issubset(set(base.columns)):
+        return None
+
+    try:
+        p = float(demand_percentile) if demand_percentile is not None else 60.0
+    except Exception:
+        p = 60.0
+    p = max(50.0, min(100.0, p))
+
+    # Compute clock stop target per service line from historical monthly referrals.
+    ref_base = base[["service_line", "period_end", "referrals"]].copy()
+    ref_base["referrals"] = pd.to_numeric(ref_base["referrals"], errors="coerce")
+    monthly_referrals = (
+        ref_base.dropna(subset=["service_line", "period_end", "referrals"])
+        .groupby(["service_line", "period_end"], as_index=False)
+        .agg(referrals=("referrals", "sum"))
+    )
+    if monthly_referrals.empty:
+        return None
+
+    targets = monthly_referrals.groupby("service_line")["referrals"].quantile(p / 100.0)
+    targets_map = targets.to_dict()
+
+    # Latest month aggregates.
+    latest = base[base["period_end"] == latest_period_end].copy()
+    if latest.empty:
+        return None
+
+    latest["caseload"] = pd.to_numeric(latest["caseload"], errors="coerce")
+    latest_caseload = latest["caseload"].sum(skipna=True)
+
+    latest["clock_stop_actuals"] = pd.to_numeric(
+        latest["clock_stop_actuals"], errors="coerce"
+    )
+    latest["discharges_no_clock_stop"] = pd.to_numeric(
+        latest["discharges_no_clock_stop"], errors="coerce"
+    )
+
+    by_service = latest.groupby("service_line", as_index=False).agg(
+        clock_stop_actuals=("clock_stop_actuals", "sum"),
+        discharges_no_clock_stop=("discharges_no_clock_stop", "sum"),
+    )
+    by_service["clock_stop_target"] = by_service["service_line"].map(targets_map)
+    by_service["clock_stop_target"] = pd.to_numeric(
+        by_service["clock_stop_target"], errors="coerce"
+    )
+
+    # Keep only valid denominators.
+    by_service = by_service.dropna(subset=["clock_stop_target"])
+    by_service = by_service[by_service["clock_stop_target"] > 0]
+    if by_service.empty:
+        return None
+
+    numer = (
+        pd.to_numeric(by_service["clock_stop_actuals"], errors="coerce").fillna(0)
+        + pd.to_numeric(by_service["discharges_no_clock_stop"], errors="coerce").fillna(
+            0
+        )
+    ).sum()
+    denom = pd.to_numeric(by_service["clock_stop_target"], errors="coerce").sum()
+    if not np.isfinite(numer) or not np.isfinite(denom) or float(denom) <= 0:
+        return None
+
+    demand_ratio_latest = float(numer) / float(denom)
+    if not np.isfinite(demand_ratio_latest) or demand_ratio_latest <= 0:
+        return None
+
+    if not np.isfinite(latest_caseload) or float(latest_caseload) < 0:
+        return None
+
+    return float(latest_caseload) / float(demand_ratio_latest)
 
 
 def create_filter_section():
@@ -1316,9 +1744,10 @@ def update_footer(data_json):
     [
         Input("main-tabs", "value"),
         Input("filtered-data-store", "data"),
+        Input("demand-percentile-dropdown", "value"),
     ],
 )
-def update_tab_content(active_tab, data_json):
+def update_tab_content(active_tab, data_json, demand_percentile):
     """Render the selected tab content.
 
     Args:
@@ -1343,16 +1772,16 @@ def update_tab_content(active_tab, data_json):
         )
 
     if active_tab == "overview-tab":
-        return create_overview_tab(df)
+        return create_overview_tab(df, demand_percentile=demand_percentile)
     elif active_tab == "demand-tab":
-        return create_demand_tab(df)
+        return create_demand_tab(df, demand_percentile=demand_percentile)
     elif active_tab == "capacity-tab":
         return create_capacity_tab(df)
 
     return html.Div("Invalid tab selection")
 
 
-def create_overview_tab(df):
+def create_overview_tab(df, *, demand_percentile: Optional[int | float] = 60):
     """Create the Overview tab layout.
 
     Args:
@@ -1457,6 +1886,58 @@ def create_overview_tab(df):
         className="mb-4 shadow-sm",
     )
 
+    sustainable_caseload = _compute_sustainable_caseload_latest(
+        df_sorted,
+        demand_percentile=demand_percentile,
+    )
+    demand_ratio_latest = _compute_demand_ratio_latest(
+        df_sorted,
+        demand_percentile=demand_percentile,
+    )
+    net_flow_latest = _compute_net_caseload_flow_latest(df_sorted)
+    throughput_rate_latest = _compute_caseload_throughput_rate_latest(df_sorted)
+    sustainable_card_row = dbc.Row(
+        [
+            dbc.Col(
+                create_metric_card(
+                    "Sustainable Caseload (DR=1.0)",
+                    _format_int_card_value(sustainable_caseload),
+                    "🌿",
+                    "success",
+                ),
+                width=3,
+            ),
+            dbc.Col(
+                create_metric_card(
+                    "Demand Ratio (Latest)",
+                    _format_ratio_card_value(demand_ratio_latest, decimals=3),
+                    "⚖️",
+                    "primary",
+                ),
+                width=3,
+            ),
+            dbc.Col(
+                create_metric_card(
+                    "Net Caseload Flow (Latest)",
+                    _format_signed_int_card_value(net_flow_latest),
+                    "🔄",
+                    "warning",
+                ),
+                width=3,
+            ),
+            dbc.Col(
+                create_metric_card(
+                    "Caseload Throughput Rate (Latest)",
+                    _format_percent_card_value(throughput_rate_latest, decimals=1),
+                    "♻️",
+                    "info",
+                ),
+                width=3,
+            ),
+        ],
+        className="mb-4 justify-content-center",
+    )
+
     # -----------------------------
     # Layout
     # -----------------------------
@@ -1481,6 +1962,7 @@ def create_overview_tab(df):
                 id="overview-keymetrics-visible-metrics",
                 data=default_visible_metrics,
             ),
+            sustainable_card_row,
             key_metrics_chart,
             staff_vs_caseload_card,
             waiters_chart,
@@ -2418,7 +2900,7 @@ def _capacity_staff_vs_caseload_latest_figure(
     return _capacity_style_figure(fig)
 
 
-def create_demand_tab(df):
+def create_demand_tab(df, *, demand_percentile: Optional[int | float] = 60):
     """Create the Demand tab layout.
 
     Args:
@@ -2481,6 +2963,58 @@ def create_demand_tab(df):
             className="mb-4 shadow-sm",
         )
 
+    sustainable_caseload = _compute_sustainable_caseload_latest(
+        df_sorted,
+        demand_percentile=demand_percentile,
+    )
+    demand_ratio_latest = _compute_demand_ratio_latest(
+        df_sorted,
+        demand_percentile=demand_percentile,
+    )
+    net_flow_latest = _compute_net_caseload_flow_latest(df_sorted)
+    throughput_rate_latest = _compute_caseload_throughput_rate_latest(df_sorted)
+    sustainable_card_row = dbc.Row(
+        [
+            dbc.Col(
+                create_metric_card(
+                    "Sustainable Caseload (DR=1.0)",
+                    _format_int_card_value(sustainable_caseload),
+                    "🌿",
+                    "success",
+                ),
+                width=3,
+            ),
+            dbc.Col(
+                create_metric_card(
+                    "Demand Ratio (Latest)",
+                    _format_ratio_card_value(demand_ratio_latest, decimals=3),
+                    "⚖️",
+                    "primary",
+                ),
+                width=3,
+            ),
+            dbc.Col(
+                create_metric_card(
+                    "Net Caseload Flow (Latest)",
+                    _format_signed_int_card_value(net_flow_latest),
+                    "🔄",
+                    "warning",
+                ),
+                width=3,
+            ),
+            dbc.Col(
+                create_metric_card(
+                    "Caseload Throughput Rate (Latest)",
+                    _format_percent_card_value(throughput_rate_latest, decimals=1),
+                    "♻️",
+                    "info",
+                ),
+                width=3,
+            ),
+        ],
+        className="mb-4 justify-content-center",
+    )
+
     return html.Div(
         [
             dbc.Alert(
@@ -2497,6 +3031,7 @@ def create_demand_tab(df):
                 color="info",
                 className="mt-4",
             ),
+            sustainable_card_row,
             dbc.Row(
                 [
                     dbc.Col(
