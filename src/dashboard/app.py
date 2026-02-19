@@ -277,6 +277,95 @@ def _format_ratio_card_value(value: Optional[float], *, decimals: int = 3) -> st
     return f"{x:.{d}f}"
 
 
+def _format_signed_int_card_value(value: Optional[float]) -> str:
+    """Format a signed integer KPI value for display, or return 'N/A'."""
+
+    if value is None:
+        return "N/A"
+    try:
+        if pd.isna(value):
+            return "N/A"
+    except Exception:
+        pass
+
+    try:
+        x = float(value)
+    except Exception:
+        return "N/A"
+
+    if not np.isfinite(x):
+        return "N/A"
+
+    n = int(round(x))
+    if n > 0:
+        return f"+{n:,}"
+    return f"{n:,}"
+
+
+def _compute_net_caseload_flow_latest(df: pd.DataFrame) -> Optional[float]:
+    """Compute latest-month net flow = inflow - outflow.
+
+    Inflow:
+      - referrals (sum)
+    Outflow (first available):
+      - discharges_with_clock_stop + discharges_no_clock_stop (if both exist)
+      - discharges_with_clock_stop (if only this exists)
+      - clock_stop_actuals (fallback if discharge fields are absent)
+    """
+
+    if df is None or df.empty:
+        return None
+
+    base = df.copy()
+    if "period_end" not in base.columns:
+        return None
+
+    base["period_end"] = pd.to_datetime(base["period_end"], errors="coerce")
+    base = base.dropna(subset=["period_end"])
+    if base.empty:
+        return None
+
+    base["period_end"] = base["period_end"].dt.to_period("M").dt.to_timestamp("M")
+    latest_period_end = base["period_end"].max()
+    if pd.isna(latest_period_end):
+        return None
+
+    if "referrals" not in base.columns:
+        return None
+
+    latest = base[base["period_end"] == latest_period_end].copy()
+    if latest.empty:
+        return None
+
+    inflow = pd.to_numeric(latest["referrals"], errors="coerce").sum(skipna=True)
+
+    has_with = "discharges_with_clock_stop" in latest.columns
+    has_no = "discharges_no_clock_stop" in latest.columns
+    if has_with and has_no:
+        outflow = pd.to_numeric(
+            latest["discharges_with_clock_stop"], errors="coerce"
+        ).sum(skipna=True) + pd.to_numeric(
+            latest["discharges_no_clock_stop"], errors="coerce"
+        ).sum(
+            skipna=True
+        )
+    elif has_with:
+        outflow = pd.to_numeric(
+            latest["discharges_with_clock_stop"], errors="coerce"
+        ).sum(skipna=True)
+    elif "clock_stop_actuals" in latest.columns:
+        outflow = pd.to_numeric(latest["clock_stop_actuals"], errors="coerce").sum(
+            skipna=True
+        )
+    else:
+        return None
+
+    if not np.isfinite(inflow) or not np.isfinite(outflow):
+        return None
+
+    return float(inflow) - float(outflow)
+
+
 def _compute_demand_ratio_latest(
     df: pd.DataFrame,
     *,
@@ -1718,6 +1807,7 @@ def create_overview_tab(df, *, demand_percentile: Optional[int | float] = 60):
         df_sorted,
         demand_percentile=demand_percentile,
     )
+    net_flow_latest = _compute_net_caseload_flow_latest(df_sorted)
     sustainable_card_row = dbc.Row(
         [
             dbc.Col(
@@ -1735,6 +1825,15 @@ def create_overview_tab(df, *, demand_percentile: Optional[int | float] = 60):
                     _format_ratio_card_value(demand_ratio_latest, decimals=3),
                     "⚖️",
                     "primary",
+                ),
+                width=4,
+            ),
+            dbc.Col(
+                create_metric_card(
+                    "Net Caseload Flow (Latest)",
+                    _format_signed_int_card_value(net_flow_latest),
+                    "🔄",
+                    "warning",
                 ),
                 width=4,
             ),
@@ -2775,6 +2874,7 @@ def create_demand_tab(df, *, demand_percentile: Optional[int | float] = 60):
         df_sorted,
         demand_percentile=demand_percentile,
     )
+    net_flow_latest = _compute_net_caseload_flow_latest(df_sorted)
     sustainable_card_row = dbc.Row(
         [
             dbc.Col(
@@ -2792,6 +2892,15 @@ def create_demand_tab(df, *, demand_percentile: Optional[int | float] = 60):
                     _format_ratio_card_value(demand_ratio_latest, decimals=3),
                     "⚖️",
                     "primary",
+                ),
+                width=4,
+            ),
+            dbc.Col(
+                create_metric_card(
+                    "Net Caseload Flow (Latest)",
+                    _format_signed_int_card_value(net_flow_latest),
+                    "🔄",
+                    "warning",
                 ),
                 width=4,
             ),
