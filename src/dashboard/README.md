@@ -82,6 +82,10 @@ After filters are applied, the dashboard shows KPI cards (sums across the select
 - Referrals, Waiters, Caseload, Contacts, Discharges
 - Total Staff (sum across staffing rows for the currently selected provider(s); staffing is not time-indexed in the current dataset)
 
+Additional derived KPI (tab-specific):
+- **Sustainable Caseload (DR=1.0)** (Overview + Demand tabs only). Uses the Demand Ratio framework to estimate the latest-month caseload that would be sustainable if Demand Ratio were 1.0.
+- **Demand Ratio (Latest)** (Overview + Demand tabs only). Latest-month Demand Ratio computed using the same clock-stop-target approach as the Demand table (driven by the Demand Percentile filter).
+
 ---
 
 ## Tabs
