@@ -78,3 +78,30 @@ Across patient and staffing ingestion, the tests check:
 - **CSV loading behaviour** (successful reads + missing-file errors)
 
 Together, these tests act as a stress-test harness: they confirm the pipeline continues to produce consistent, analysis-ready frames even when upstream shapes (column cases, provider code types) vary.
+
+---
+
+## 7.4 Resolve Model Errors & Outlier Handling
+
+### What I tested / evaluated
+During development I explored adding automated **outlier handling** and additional **model error checks** (e.g., detecting extreme spikes/drops and handling edge cases where time series are too short/flat to fit reliably).
+
+The feature was assessed from a testing perspective in terms of:
+- **Correctness**: whether suspected outliers would be flagged consistently and whether the downstream forecast would remain stable.
+- **Robustness**: ensuring the pipeline fails safely on problematic series (missing months, very short histories, constant values).
+- **Runtime impact**: measuring the additional processing time when these checks run inside the dashboard’s interactive callbacks.
+
+### Why it was not built into the live dashboard pipeline
+The main constraint was **performance**.
+
+In this project the dashboard is designed for interactive exploration (users frequently change service line(s) and date range). Running additional outlier detection / correction on every filter change would:
+- noticeably **slow data loading and callback execution**, and
+- reduce the overall responsiveness of the dashboard experience.
+
+### Stakeholder communication & decision
+This trade-off (better automated outlier handling vs. slower dashboard performance) was communicated to stakeholders.
+
+Stakeholders were initially reluctant to drop the feature, but agreed that maintaining a responsive dashboard was higher priority for this iteration. The outcome was to **leave outlier handling out of the runtime pipeline** and keep the implementation focused on stability and speed.
+
+### Future option (if re-scoped)
+If outlier handling is required later, the preferred approach would be to run it as an **offline / scheduled preprocessing step** (or as a cached, precomputed dataset), so the dashboard still loads quickly while benefiting from cleaner inputs.
