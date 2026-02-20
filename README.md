@@ -245,9 +245,9 @@ As defined in the Project Plan (Section 2, p. 1) :
 | Data Access & Infrastructure Setup     | ✅ Completed | Mid Dec 2025      | 15/12/2025      | 15          | SQL access, governance approvals, secure Python environment |
 | Data Engineering & Automation Pipeline | ✅ Completed | Early Jan 2026    | 22/12/2025      | 30          | Direct-query pipeline, validation scripts, staffing & demand ingestion |
 | Forecasting Module (MVP)               | ✅ Completed  | Early Feb 2026    | 09/02/2026     | 97.5         | ETS forecasting utilities (dashboard default) + SARIMA retained under archived utilities |
-| Capacity & Simulation Module           | ⏳ Upcoming  | Mid Feb 2026      | —               | —           | Queueing and simulation with SimPy |
-| Dash Application Development           | 📁 In Progress  | End Feb 2026      | —               | 30           | Interactive dashboard (Overview/Demand/Capacity tabs, filters, percentile-based targets, derived tables, ETS forecast toggles; staffing snapshot used as reference) |
-| Testing, Validation & Refinement       | ⏳ Upcoming  | End Feb 2026      | —               | —           | Forecast evaluation, stakeholder testing |
+| Capacity & Simulation Module           | ✅ Completed (Re-scoped) | Mid Feb 2026      | 09/02/2026      | 7.5           | Pivoted (WC 09/02/2026): simulation/queueing de-scoped due to no workforce time series + service-line mapping misalignment; delivered reference-based capacity view (snapshot staffing mix/allocations) in dashboard |
+| Dash Application Development           | ✅ Completed   | End Feb 2026      | 19/02/2026    | 30           | Interactive dashboard (Overview/Demand/Capacity tabs, filters, percentile-based targets, derived tables, ETS forecast toggles; staffing snapshot used as reference) |
+| Testing, Validation & Refinement       | 📁 In Progress  | End Feb 2026      | —               | 7.5           | Forecast evaluation, stakeholder testing |
 | Documentation & Final Presentation Prep| ⏳ Upcoming  | June 2026         | —               | —           | Written portfolio, slides, video pitch |
 
 Milestones taken from the Project Plan timeline (Section 6, pp. 3–4) .
@@ -271,64 +271,67 @@ Thanks to:
 
 ## 15. Project Flow Diagram
 
-Note: this diagram represents the target architecture across workstreams (some modules are planned / in-progress).
+Note: this diagram represents the target architecture across workstreams.
 
 ```mermaid
 flowchart TD
 
-    subgraph Data_Sources
-        Referrals[(Referrals Data)]
-        Appointments[(Appointments Data)]
-        Workforce[(Workforce Data)]
-        Metadata[(Service Metadata)]
-        Calendar[(Calendar & Holidays)]
+    subgraph Data_Sources["Data Sources"]
+        Referrals[(Referrals)]
+        Appointments[(Appointments)]
+        Workforce[(Workforce)]
+        Metadata[(Service metadata)]
+        Calendar[(Calendar & holidays)]
     end
 
-    subgraph Data_Engineering_Pipeline
-        SQLQuery[SQL Extraction]
-        Validation[Data Validation & Profiling]
-        Transform[Feature Engineering]
+    subgraph Data_Engineering_Pipeline["Data Engineering Pipeline"]
+        SQLQuery[SQL extraction]
+        Validation[Validation & profiling]
+        Transform[Feature engineering]
         Pseudonymise[Pseudonymisation]
+        Curated[(Curated / master dataset)]
     end
 
-    subgraph Forecasting_Engine
-        ETS[ETS Model (dashboard)]
-        SARIMA[Archived SARIMA]
-        ModelSelect[Spec Selection (AIC)]
-    end
-
-    subgraph Demand_Modelling
+    subgraph Demand_Modelling["Demand Modelling"]
         Refs[Referrals]
         Waiters[Waiters]
         Caseload[Caseload]
         Contacts[Contacts]
         Discharges[Discharges]
+        DemandTS[(Demand time series)]
     end
 
-    subgraph Capacity_Modelling
-        Templates[Service Templates]
-        Staffing[Staffing & Rosters]
-        Constraints[Resource Constraints]
+    subgraph Capacity_Modelling["Capacity Modelling"]
+        Templates[Service templates]
+        Staffing[Staffing & rosters]
+        Constraints[Resource constraints]
+        CapacitySnap[(Capacity snapshot / view)]
     end
 
-    subgraph Simulation
-        Queues[Queueing Models]
-        SimPyEngine[SimPy Engine]
-        Scenarios[Scenario Analysis]
+    subgraph Forecasting_Engine["Forecasting Engine"]
+        ModelSelect["Model selection (AIC)"]
+        ETS["ETS (dashboard default)"]
+        SARIMA[Archived SARIMA]
+        ForecastOut[(Forecast outputs)]
     end
 
-    subgraph Dashboard_App
+    subgraph Dashboard_App["Dashboard App"]
         UI[Interactive UI]
-        ForecastViz[Forecast Visualisations]
-        SimViz[Simulation Outputs]
-        ScenarioControls[Scenario Controls]
+        Viz[Demand & capacity visualisations]
     end
 
-    Data_Sources --> Data_Engineering_Pipeline
-    Data_Engineering_Pipeline --> Demand_Modelling
-    Data_Engineering_Pipeline --> Capacity_Modelling
-    Demand_Modelling --> Forecasting_Engine 
-    Capacity_Modelling --> Forecasting_Engine 
-    Forecasting_Engine --> Simulation
-    Simulation --> Dashboard_App
-    ```
+    Data_Sources --> SQLQuery
+    SQLQuery --> Validation --> Transform --> Pseudonymise --> Curated
+
+    Curated --> Demand_Modelling
+    Curated --> Capacity_Modelling
+
+    Demand_Modelling --> DemandTS --> ModelSelect
+    ModelSelect --> ETS --> ForecastOut
+    ModelSelect -. "optional" .-> SARIMA
+    SARIMA -.-> ForecastOut
+
+    ForecastOut --> Viz
+    Capacity_Modelling --> CapacitySnap --> Viz
+    Viz --> UI
+```
