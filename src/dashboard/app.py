@@ -19,6 +19,13 @@ from plotly.subplots import make_subplots
 import pandas as pd
 import numpy as np
 
+# Ensure the dashboard folder is importable regardless of how the file is executed.
+# This supports launches like VS Code "Run Python File", `python src/dashboard/app.py`,
+# and `runpy.run_path(...)` where the script directory may not be on sys.path.
+DASHBOARD_DIR = Path(__file__).resolve().parent
+if str(DASHBOARD_DIR) not in sys.path:
+    sys.path.insert(0, str(DASHBOARD_DIR))
+
 from data_handler import get_data_handler, DataHandler
 
 # Allow imports from sibling folders under `src/` when running as:
@@ -451,6 +458,74 @@ def _compute_caseload_throughput_rate_latest(df: pd.DataFrame) -> Optional[float
         return None
 
     return float(outflow) / float(caseload)
+
+
+def _compute_clearance_time_weeks_latest(
+    df: pd.DataFrame,
+    *,
+    weeks_in_month: float = 4.3,
+    waiters_col: str = "waiters",
+    first_contacts_col: str = "clock_stop_actuals",
+) -> Optional[float]:
+    """Compute the latest-month waiting list clearance time in weeks.
+
+    Purpose:
+        Estimate how many weeks it would take to clear the current waiting list
+        at the current (latest-month) rate of first contacts.
+
+    Formula:
+        clearance_weeks = Waiters / (LatestMonthFirstContacts / 4.3)
+    """
+
+    if df is None or df.empty:
+        return None
+
+    base = df.copy()
+    if "period_end" not in base.columns:
+        return None
+
+    if waiters_col not in base.columns or first_contacts_col not in base.columns:
+        return None
+
+    try:
+        wim = float(weeks_in_month)
+    except Exception:
+        wim = 4.3
+    if not np.isfinite(wim) or wim <= 0:
+        return None
+
+    base["period_end"] = pd.to_datetime(base["period_end"], errors="coerce")
+    base = base.dropna(subset=["period_end"])
+    if base.empty:
+        return None
+
+    base["period_end"] = base["period_end"].dt.to_period("M").dt.to_timestamp("M")
+    latest_period_end = base["period_end"].max()
+    if pd.isna(latest_period_end):
+        return None
+
+    latest = base[base["period_end"] == latest_period_end].copy()
+    if latest.empty:
+        return None
+
+    waiters = pd.to_numeric(latest[waiters_col], errors="coerce").sum(skipna=True)
+    first_contacts = pd.to_numeric(latest[first_contacts_col], errors="coerce").sum(
+        skipna=True
+    )
+
+    if not np.isfinite(waiters) or float(waiters) < 0:
+        return None
+    if not np.isfinite(first_contacts) or float(first_contacts) <= 0:
+        return None
+
+    weekly_contact_rate = float(first_contacts) / float(wim)
+    if not np.isfinite(weekly_contact_rate) or weekly_contact_rate <= 0:
+        return None
+
+    clearance_weeks = float(waiters) / float(weekly_contact_rate)
+    if not np.isfinite(clearance_weeks) or clearance_weeks < 0:
+        return None
+    return clearance_weeks
 
 
 def _compute_demand_ratio_latest(
@@ -1896,46 +1971,76 @@ def create_overview_tab(df, *, demand_percentile: Optional[int | float] = 60):
     )
     net_flow_latest = _compute_net_caseload_flow_latest(df_sorted)
     throughput_rate_latest = _compute_caseload_throughput_rate_latest(df_sorted)
+    clearance_weeks_latest = _compute_clearance_time_weeks_latest(df_sorted)
     sustainable_card_row = dbc.Row(
         [
             dbc.Col(
                 create_metric_card(
-                    "Sustainable Caseload (DR=1.0)",
+                    "Sustainable Caseload",
                     _format_int_card_value(sustainable_caseload),
                     "🌿",
                     "success",
                 ),
-                width=3,
+                xs=12,
+                sm=6,
+                md=4,
+                lg=2,
+                style={"minWidth": "220px"},
             ),
             dbc.Col(
                 create_metric_card(
-                    "Demand Ratio (Latest)",
+                    "Demand Ratio",
                     _format_ratio_card_value(demand_ratio_latest, decimals=3),
                     "⚖️",
                     "primary",
                 ),
-                width=3,
+                xs=12,
+                sm=6,
+                md=4,
+                lg=2,
+                style={"minWidth": "220px"},
             ),
             dbc.Col(
                 create_metric_card(
-                    "Net Caseload Flow (Latest)",
+                    "Net Caseload Flow",
                     _format_signed_int_card_value(net_flow_latest),
                     "🔄",
                     "warning",
                 ),
-                width=3,
+                xs=12,
+                sm=6,
+                md=4,
+                lg=2,
+                style={"minWidth": "220px"},
             ),
             dbc.Col(
                 create_metric_card(
-                    "Caseload Throughput (Latest)",
+                    "Caseload Throughput",
                     _format_percent_card_value(throughput_rate_latest, decimals=1),
                     "♻️",
                     "info",
                 ),
-                width=3,
+                xs=12,
+                sm=6,
+                md=4,
+                lg=2,
+                style={"minWidth": "220px"},
+            ),
+            dbc.Col(
+                create_metric_card(
+                    "Clearance Time",
+                    _format_ratio_card_value(clearance_weeks_latest, decimals=1),
+                    "🧹",
+                    "secondary",
+                ),
+                xs=12,
+                sm=6,
+                md=4,
+                lg=2,
+                style={"minWidth": "220px"},
             ),
         ],
-        className="mb-4 justify-content-center",
+        className="mb-4 justify-content-center g-3",
     )
 
     # -----------------------------
@@ -2973,46 +3078,76 @@ def create_demand_tab(df, *, demand_percentile: Optional[int | float] = 60):
     )
     net_flow_latest = _compute_net_caseload_flow_latest(df_sorted)
     throughput_rate_latest = _compute_caseload_throughput_rate_latest(df_sorted)
+    clearance_weeks_latest = _compute_clearance_time_weeks_latest(df_sorted)
     sustainable_card_row = dbc.Row(
         [
             dbc.Col(
                 create_metric_card(
-                    "Sustainable Caseload (DR=1.0)",
+                    "Sustainable Caseload",
                     _format_int_card_value(sustainable_caseload),
                     "🌿",
                     "success",
                 ),
-                width=3,
+                xs=12,
+                sm=6,
+                md=4,
+                lg=2,
+                style={"minWidth": "220px"},
             ),
             dbc.Col(
                 create_metric_card(
-                    "Demand Ratio (Latest)",
+                    "Demand Ratio",
                     _format_ratio_card_value(demand_ratio_latest, decimals=3),
                     "⚖️",
                     "primary",
                 ),
-                width=3,
+                xs=12,
+                sm=6,
+                md=4,
+                lg=2,
+                style={"minWidth": "220px"},
             ),
             dbc.Col(
                 create_metric_card(
-                    "Net Caseload Flow (Latest)",
+                    "Net Caseload Flow",
                     _format_signed_int_card_value(net_flow_latest),
                     "🔄",
                     "warning",
                 ),
-                width=3,
+                xs=12,
+                sm=6,
+                md=4,
+                lg=2,
+                style={"minWidth": "220px"},
             ),
             dbc.Col(
                 create_metric_card(
-                    "Caseload Throughput Rate (Latest)",
+                    "Caseload Throughput",
                     _format_percent_card_value(throughput_rate_latest, decimals=1),
                     "♻️",
                     "info",
                 ),
-                width=3,
+                xs=12,
+                sm=6,
+                md=4,
+                lg=2,
+                style={"minWidth": "220px"},
+            ),
+            dbc.Col(
+                create_metric_card(
+                    "Clearance Time",
+                    _format_ratio_card_value(clearance_weeks_latest, decimals=1),
+                    "🧹",
+                    "secondary",
+                ),
+                xs=12,
+                sm=6,
+                md=4,
+                lg=2,
+                style={"minWidth": "220px"},
             ),
         ],
-        className="mb-4 justify-content-center",
+        className="mb-4 justify-content-center g-3",
     )
 
     return html.Div(
@@ -3237,6 +3372,13 @@ if __name__ == "__main__":
     logger.info("Starting NHFT Demand-Capacity Dashboard...")
     logger.info("Dashboard will be available at: http://127.0.0.1:8050/")
 
-    # Flask's debug reloader starts the app twice (parent + child). Disable it to
-    # prevent duplicate startup logs while keeping debug mode features.
-    app.run(debug=True, host="127.0.0.1", port=8050, use_reloader=False)
+    # Keep the debug reloader enabled so layout/code changes appear immediately
+    # after save during development.
+    try:
+        app.run(debug=True, host="127.0.0.1", port=8050, use_reloader=True)
+    except OSError as e:
+        logger.error("❌ Failed to start Dash server: %s", e)
+        logger.error(
+            "If you already have the dashboard running, stop it (Ctrl+C) or change the port."
+        )
+        raise

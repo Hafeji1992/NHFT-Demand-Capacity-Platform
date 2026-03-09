@@ -62,6 +62,15 @@ From the project root:
    python src/dashboard/app.py
    ```
 
+  Notes:
+  - The dashboard is a long-running web server. After it prints the local URL (e.g. `http://127.0.0.1:8050`), it will keep running until you stop it.
+  - If you stop the process (Ctrl+C / VS Code Stop), you may see `KeyboardInterrupt` in the terminal. This is expected and just means the server was interrupted.
+
+  If you're already in the `src/dashboard` folder, you can run it like this instead:
+  ```bash
+  ..\.\.venv\Scripts\python.exe app.py
+  ```
+
 3. Open the local URL shown in the console (default `http://127.0.0.1:8050`).
 
 ---
