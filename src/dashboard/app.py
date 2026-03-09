@@ -1927,7 +1927,7 @@ def create_overview_tab(df, *, demand_percentile: Optional[int | float] = 60):
             ),
             dbc.Col(
                 create_metric_card(
-                    "Caseload Throughput Rate (Latest)",
+                    "Caseload Throughput (Latest)",
                     _format_percent_card_value(throughput_rate_latest, decimals=1),
                     "♻️",
                     "info",
