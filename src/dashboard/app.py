@@ -999,9 +999,6 @@ def _metric_timeseries_figure(
             if len(y) >= 12 and y.nunique() >= 2:
                 # Use the filtered series signature as a cache key so model
                 # selection runs only once per metric per filter state.
-                #
-                # Your dataset currently spans ~30 months, so we keep the search
-                # space intentionally small to stay responsive.
                 y_fit = y
                 if len(y_fit) > 36:
                     y_fit = y_fit.iloc[-36:]
@@ -1015,8 +1012,6 @@ def _metric_timeseries_figure(
                 )
                 if spec is None:
                     y_len = int(len(y_fit))
-                    # Guardrails for short monthly series (~30 months): ETS with
-                    # additive seasonality is usually OK, but keep it optional.
                     seasonal_opts = ("add", None) if y_len >= 24 else (None,)
 
                     spec = small_grid_search_aic_ets(
