@@ -998,7 +998,6 @@ def _metric_timeseries_figure(
 
     if y.empty:
         fig.update_layout(
-            title=dict(text=label, x=0.5, xanchor="center"),
             template="plotly_white",
             height=420,
             paper_bgcolor="rgba(0,0,0,0)",
@@ -1193,13 +1192,12 @@ def _metric_timeseries_figure(
             )
 
     fig.update_layout(
-        title=dict(text=label, x=0.5, xanchor="center", font=dict(size=20)),
         xaxis_title="Period",
         yaxis_title="Count",
         hovermode="x unified",
         height=420,
         template="plotly_white",
-        margin=dict(l=40, r=30, t=70, b=50),
+        margin=dict(l=40, r=30, t=20, b=50),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
     )
@@ -1509,12 +1507,6 @@ def _overview_key_metrics_figure(
             )
 
     fig.update_layout(
-        title=dict(
-            text="Key Metrics Over Time",
-            x=0.5,
-            xanchor="center",
-            font=dict(size=22),
-        ),
         xaxis_title="Period",
         yaxis_title="Count",
         hovermode="x unified",
@@ -1535,7 +1527,7 @@ def _overview_key_metrics_figure(
         legend_itemclick="toggle",
         legend_itemdoubleclick="toggleothers",
         legend_groupclick="togglegroup",
-        margin=dict(l=40, r=200, t=80, b=50),
+        margin=dict(l=40, r=200, t=20, b=50),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
     )
@@ -1569,7 +1561,7 @@ app.layout = dbc.Container(
                 dbc.Col(
                     [
                         html.H1(
-                            "🏥 NHFT Demand & Capacity Platform",
+                            "NHFT Demand & Capacity Platform",
                             className="text-center my-4",
                         ),
                         html.Hr(),
@@ -2870,7 +2862,7 @@ def _capacity_filter_staffing(
 def _capacity_style_figure(fig: go.Figure) -> go.Figure:
     """Apply a consistent, dashboard-friendly Plotly style."""
     fig.update_layout(
-        margin=dict(l=40, r=40, t=60, b=40),
+        margin=dict(l=40, r=40, t=20, b=40),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
         legend=dict(
@@ -2900,7 +2892,6 @@ def _capacity_staff_mix_by_group_figure(staffing_filtered: pd.DataFrame) -> go.F
         x="staff",
         y="staff_group",
         orientation="h",
-        title="Total Staff by Staff Group",
         labels={"staff": "Staff (count)", "staff_group": "Staff group"},
     )
     fig.update_traces(hovertemplate="%{y}<br>Staff: %{x:,}<extra></extra>")
@@ -2914,7 +2905,6 @@ def _capacity_staff_by_service_line_figure(
     if staffing_filtered is None or staffing_filtered.empty:
         fig = go.Figure()
         fig.update_layout(
-            title=dict(text="Total Staff by Service Line", x=0.5, xanchor="center"),
             template="plotly_white",
             height=420,
             paper_bgcolor="rgba(0,0,0,0)",
@@ -2925,7 +2915,6 @@ def _capacity_staff_by_service_line_figure(
     if "service_line" not in staffing_filtered.columns:
         fig = go.Figure()
         fig.update_layout(
-            title=dict(text="Total Staff by Service Line", x=0.5, xanchor="center"),
             template="plotly_white",
             height=420,
             paper_bgcolor="rgba(0,0,0,0)",
@@ -2940,19 +2929,19 @@ def _capacity_staff_by_service_line_figure(
     )
 
     n_lines = int(by_service_line.shape[0])
-    fig_height = max(450, min(2400, 26 * n_lines + 200))
+    fig_height = max(460, 28 * n_lines + 120)
 
     fig = px.bar(
         by_service_line,
         x="staff",
         y="service_line",
         orientation="h",
-        title="Total Staff by Service Line",
-        labels={"staff": "Staff (count)", "service_line": "Service line"},
+        labels={"staff": "Staff (count)", "service_line": "Service Line"},
         height=fig_height,
     )
     fig.update_traces(hovertemplate="%{y}<br>Staff: %{x:,}<extra></extra>")
     fig.update_xaxes(showgrid=False)
+    fig.update_yaxes(showgrid=False)
     return _capacity_style_figure(fig)
 
 
@@ -3037,7 +3026,6 @@ def _capacity_staff_vs_caseload_latest_figure(
             "staff_per_100_caseload": ":.2f",
             "service_label": False,
         },
-        title=f"Staff vs Caseload (Latest period: {latest_period_end.strftime('%b %Y')})",
         labels={
             "caseload": "Caseload (latest)",
             "staff": "Staff (total)",
@@ -3050,6 +3038,161 @@ def _capacity_staff_vs_caseload_latest_figure(
     fig.update_xaxes(showgrid=False, tickformat=",")
     fig.update_yaxes(tickformat=",")
     return _capacity_style_figure(fig)
+
+
+# Note: Helper that builds a net caseload flow trend line chart over time.
+def _demand_net_flow_trend_figure(df: pd.DataFrame) -> go.Figure:
+    """Line chart showing monthly net caseload flow (referrals minus discharges) by service over time."""
+
+    summary_df = _build_demand_summary_table_frame(df, demand_percentile=60)
+    fig = go.Figure()
+
+    required_cols = {"service_line", "referrals", "period_end"}
+    if summary_df.empty or not required_cols.issubset(set(summary_df.columns)):
+        fig.add_annotation(
+            x=0.5,
+            y=0.5,
+            xref="paper",
+            yref="paper",
+            text="Not enough data to compute net caseload flow trend",
+            showarrow=False,
+        )
+        fig.update_layout(template="plotly_white", height=420)
+        return fig
+
+    summary_df = summary_df.copy()
+    summary_df["period_end"] = pd.to_datetime(summary_df["period_end"], errors="coerce")
+    summary_df["referrals"] = pd.to_numeric(summary_df["referrals"], errors="coerce")
+
+    # Calculate total outflow (discharges)
+    if "discharges_no_clock_stop" in summary_df.columns:
+        discharges_no = pd.to_numeric(
+            summary_df["discharges_no_clock_stop"], errors="coerce"
+        ).fillna(0)
+    else:
+        discharges_no = pd.Series(0, index=summary_df.index, dtype=float)
+
+    if "discharges_with_clock_stop" in summary_df.columns:
+        discharges_with = pd.to_numeric(
+            summary_df["discharges_with_clock_stop"], errors="coerce"
+        ).fillna(0)
+    elif "clock_stop_actuals" in summary_df.columns:
+        discharges_with = pd.to_numeric(
+            summary_df["clock_stop_actuals"], errors="coerce"
+        ).fillna(0)
+    else:
+        discharges_with = pd.Series(0, index=summary_df.index, dtype=float)
+
+    summary_df["outflow"] = discharges_with + discharges_no
+    summary_df["net_flow"] = summary_df["referrals"] - summary_df["outflow"]
+
+    if {"provider_code_current", "service_line"}.issubset(summary_df.columns):
+        summary_df["service_label"] = (
+            summary_df["provider_code_current"].astype(str)
+            + " - "
+            + summary_df["service_line"].astype(str)
+        )
+    else:
+        summary_df["service_label"] = summary_df["service_line"].astype(str)
+
+    summary_df = summary_df.dropna(subset=["period_end", "net_flow"])
+    summary_df = summary_df.sort_values("period_end")
+
+    if summary_df.empty:
+        fig.add_annotation(
+            x=0.5,
+            y=0.5,
+            xref="paper",
+            yref="paper",
+            text="No valid net flow data for selected filters",
+            showarrow=False,
+        )
+        fig.update_layout(template="plotly_white", height=420)
+        return fig
+
+    services = summary_df["service_label"].unique()
+    for svc in services:
+        svc_df = summary_df[summary_df["service_label"] == svc]
+        fig.add_trace(
+            go.Scatter(
+                x=svc_df["period_end"],
+                y=svc_df["net_flow"],
+                mode="lines+markers",
+                line=dict(shape="spline", smoothing=1.0),
+                name=svc,
+                hovertemplate="%{x|%b %Y}<br>Net Flow: %{y:,.0f}<extra>%{fullData.name}</extra>",
+            )
+        )
+
+    fig.add_hline(y=0, line_dash="dash", line_color="#444")
+    fig.update_layout(
+        xaxis_title="Month",
+        yaxis_title="Net Caseload Flow",
+        template="plotly_white",
+        height=460,
+        margin=dict(l=40, r=30, t=20, b=50),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        showlegend=True,
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1,
+            itemclick=False,
+            itemdoubleclick=False,
+        ),
+    )
+    fig.update_xaxes(showgrid=False)
+    fig.update_yaxes(tickformat=",", showgrid=True, gridcolor="rgba(0,0,0,0.08)")
+    return fig
+
+
+# Note: Compute a derived KPI from the current filtered dataset.
+def _compute_discharge_quality_latest(
+    df: pd.DataFrame,
+) -> tuple[Optional[float], Optional[float], Optional[float]]:
+    """Return latest-month weighted averages for discharge quality metrics.
+
+    Returns:
+        (avg_treatment_days, avg_contacts, avg_ftf_contacts) — any may be None.
+    """
+    if df is None or df.empty:
+        return None, None, None
+
+    base = df.copy()
+    if "period_end" not in base.columns:
+        return None, None, None
+
+    base["period_end"] = pd.to_datetime(base["period_end"], errors="coerce")
+    base = base.dropna(subset=["period_end"])
+    if base.empty:
+        return None, None, None
+
+    base["period_end"] = base["period_end"].dt.to_period("M").dt.to_timestamp("M")
+    latest_period = base["period_end"].max()
+    if pd.isna(latest_period):
+        return None, None, None
+
+    latest = base[base["period_end"] == latest_period]
+    if latest.empty:
+        return None, None, None
+
+    def _mean_or_none(col: str) -> Optional[float]:
+        if col not in latest.columns:
+            return None
+        s = pd.to_numeric(latest[col], errors="coerce").dropna()
+        if s.empty:
+            return None
+        v = float(s.mean())
+        return v if np.isfinite(v) else None
+
+    return (
+        _mean_or_none("average_length_of_treatment"),
+        _mean_or_none("average_contacts_at_discharge"),
+        _mean_or_none("average_ftf_contacts_at_discharge"),
+    )
 
 
 # Build and return a dashboard layout section or component.
@@ -3088,6 +3231,70 @@ def create_demand_tab(df, *, demand_percentile: Optional[int | float] = 60):
     )
 
     summary_table = create_service_line_summary_table(df)
+    net_flow_trend_fig = _demand_net_flow_trend_figure(df_sorted)
+    avg_treatment_days, avg_contacts, avg_ftf_contacts = (
+        _compute_discharge_quality_latest(df_sorted)
+    )
+
+    net_flow_trend_card = dbc.Card(
+        [
+            dbc.CardHeader(
+                html.H5(
+                    "Net Caseload Flow Over Time",
+                    className="mb-0",
+                )
+            ),
+            dbc.CardBody(
+                dcc.Graph(
+                    id="demand-net-flow-trend",
+                    figure=net_flow_trend_fig,
+                ),
+                className="p-2",
+            ),
+        ],
+        className="mb-4 shadow-sm",
+    )
+
+    discharge_quality_cards = html.Div(
+        [
+            html.H5(
+                "Discharge Quality (Latest Month)",
+                className="mb-3 text-center",
+            ),
+            dbc.Row(
+                [
+                    dbc.Col(
+                        create_metric_card(
+                            "Avg Treatment Length",
+                            _format_ratio_card_value(avg_treatment_days, decimals=0),
+                            "⏱️",
+                            "primary",
+                            description="Average days from referral start to first contact for discharged patients",
+                        ),
+                    ),
+                    dbc.Col(
+                        create_metric_card(
+                            "Avg Contacts at Discharge",
+                            _format_ratio_card_value(avg_contacts, decimals=1),
+                            "📋",
+                            "info",
+                            description="Average total contacts per patient at point of discharge",
+                        ),
+                    ),
+                    dbc.Col(
+                        create_metric_card(
+                            "Avg FTF Contacts at Discharge",
+                            _format_ratio_card_value(avg_ftf_contacts, decimals=1),
+                            "🤝",
+                            "success",
+                            description="Average face-to-face contacts per patient at point of discharge",
+                        ),
+                    ),
+                ],
+                className="g-3",
+            ),
+        ],
+    )
 
     def metric_card(title: str, graph_id: str, toggle_id: str):
         return dbc.Card(
@@ -3246,9 +3453,19 @@ def create_demand_tab(df, *, demand_percentile: Optional[int | float] = 60):
                         width=6,
                     ),
                     dbc.Col(
-                        waiters_breakdown_card,
+                        discharge_quality_cards,
                         width=6,
                     ),
+                ]
+            ),
+            dbc.Row(
+                [
+                    dbc.Col(waiters_breakdown_card, width=12),
+                ]
+            ),
+            dbc.Row(
+                [
+                    dbc.Col(net_flow_trend_card, width=12),
                 ]
             ),
             dbc.Row(
@@ -3334,7 +3551,7 @@ def create_capacity_tab(df):
                                             figure=fig_by_service_line,
                                         ),
                                         style={
-                                            "height": "560px",
+                                            "maxHeight": "560px",
                                             "overflowY": "auto",
                                         },
                                     ),
