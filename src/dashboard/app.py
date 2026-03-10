@@ -186,7 +186,11 @@ def _read_filtered_store_frame(data_json: str) -> pd.DataFrame:
 
 
 def create_metric_card(
-    title: str, value: str, icon: str = "📊", color: str = "primary"
+    title: str,
+    value: str,
+    icon: str = "📊",
+    color: str = "primary",
+    description: str = None,
 ):
     """Create a small KPI/metric card for the dashboard.
 
@@ -195,26 +199,34 @@ def create_metric_card(
         value: Pre-formatted value to display (e.g., "1,234").
         icon: Emoji/icon prefix for the title.
         color: Bootstrap theme colour name (e.g., "primary", "warning").
+        description: Optional description text to display below the value.
 
     Returns:
         A Dash Bootstrap Components Card.
     """
-    return dbc.Card(
-        [
-            dbc.CardBody(
-                [
-                    html.H4(
-                        [html.Span(icon, className="me-2"), title],
-                        className="card-title",
-                    ),
-                    html.H2(
-                        value,
-                        className="text-center mt-3",
-                        style={"color": f"var(--bs-{color})"},
-                    ),
-                ]
+    card_content = [
+        html.H4(
+            [html.Span(icon, className="me-2"), title],
+            className="card-title",
+        ),
+        html.H2(
+            value,
+            className="text-center mt-3",
+            style={"color": f"var(--bs-{color})"},
+        ),
+    ]
+
+    if description:
+        card_content.append(
+            html.P(
+                description,
+                className="text-muted small text-center mt-2 mb-0",
+                style={"fontSize": "0.85rem"},
             )
-        ],
+        )
+
+    return dbc.Card(
+        [dbc.CardBody(card_content)],
         className="mb-3 shadow-sm",
     )
 
@@ -1975,6 +1987,7 @@ def create_overview_tab(df, *, demand_percentile: Optional[int | float] = 60):
                     _format_ratio_card_value(demand_ratio_latest, decimals=3),
                     "⚖️",
                     "primary",
+                    description="Total throughput vs target. 100% and above means demand was met last month",
                 ),
             ),
             dbc.Col(
@@ -1983,6 +1996,7 @@ def create_overview_tab(df, *, demand_percentile: Optional[int | float] = 60):
                     _format_int_card_value(sustainable_caseload),
                     "🌿",
                     "success",
+                    description="Estimated caseload size sustainable at current throughput (based on Demand Ratio)",
                 ),
             ),
             dbc.Col(
@@ -1991,6 +2005,7 @@ def create_overview_tab(df, *, demand_percentile: Optional[int | float] = 60):
                     _format_signed_int_card_value(net_flow_latest),
                     "🔄",
                     "warning",
+                    description="Balance of patients entering vs leaving caseload (First Contacts vs Discharges)",
                 ),
             ),
             dbc.Col(
@@ -1999,14 +2014,16 @@ def create_overview_tab(df, *, demand_percentile: Optional[int | float] = 60):
                     _format_percent_card_value(throughput_rate_latest, decimals=1),
                     "♻️",
                     "info",
+                    description="Percentage of patients discharged from caseload last month",
                 ),
             ),
             dbc.Col(
                 create_metric_card(
-                    "Clearance Time",
+                    "Clearance Time (Weeks)",
                     _format_ratio_card_value(clearance_weeks_latest, decimals=1),
                     "🧹",
                     "secondary",
+                    description="Assuming referrals are closed, weeks to clear waiting list at last month's first contact rate",
                 ),
             ),
         ],
@@ -3057,6 +3074,7 @@ def create_demand_tab(df, *, demand_percentile: Optional[int | float] = 60):
                     _format_ratio_card_value(demand_ratio_latest, decimals=3),
                     "⚖️",
                     "primary",
+                    description="Total throughput vs target. 100% and above means demand was met last month",
                 ),
             ),
             dbc.Col(
@@ -3065,6 +3083,7 @@ def create_demand_tab(df, *, demand_percentile: Optional[int | float] = 60):
                     _format_int_card_value(sustainable_caseload),
                     "🌿",
                     "success",
+                    description="Estimated caseload size sustainable at current throughput (based on Demand Ratio)",
                 ),
             ),
             dbc.Col(
@@ -3073,6 +3092,7 @@ def create_demand_tab(df, *, demand_percentile: Optional[int | float] = 60):
                     _format_signed_int_card_value(net_flow_latest),
                     "🔄",
                     "warning",
+                    description="Balance of patients entering vs leaving caseload (First Contacts vs Discharges)",
                 ),
             ),
             dbc.Col(
@@ -3081,14 +3101,16 @@ def create_demand_tab(df, *, demand_percentile: Optional[int | float] = 60):
                     _format_percent_card_value(throughput_rate_latest, decimals=1),
                     "♻️",
                     "info",
+                    description="Percentage of patients discharged from caseload last month",
                 ),
             ),
             dbc.Col(
                 create_metric_card(
-                    "Clearance Time",
+                    "Clearance Time (Weeks)",
                     _format_ratio_card_value(clearance_weeks_latest, decimals=1),
                     "🧹",
                     "secondary",
+                    description="Assuming referrals are closed, weeks to clear waiting list at last month's first contact rate",
                 ),
             ),
         ],
