@@ -2039,12 +2039,13 @@ def create_overview_tab(df, *, demand_percentile: Optional[int | float] = 60):
                 [
                     html.H4("📈 Overview", className="alert-heading"),
                     html.P(
-                        "Use the filters above to change the view. In charts, you can click legend items to show/hide metrics. "
-                        "Forecast toggles apply per chart (Overview and Demand Analysis)."
+                        "This tab provides a high-level summary of service demand and capacity. "
+                        "The KPI cards show the latest month's key metrics, while the time series charts track trends over time. "
+                        "Use the filters above to focus on specific services or date ranges, and click legend items to show/hide individual metrics."
                     ),
                     html.P(
-                        "Forecasting note: ETS / exponential smoothing (Holt-Winters) works best with enough history to learn seasonality. "
-                        "For monthly data, adjust the date selector to 2-3 years (~24-36 points) when forecasting."
+                        "Forecast toggles on each chart use ETS (Holt-Winters Exponential Smoothing) to project future values with a 95% confidence interval. "
+                        "For best results, include at least 2 years of data when using forecasts."
                     ),
                 ],
                 color="info",
@@ -3123,11 +3124,13 @@ def create_demand_tab(df, *, demand_percentile: Optional[int | float] = 60):
                 [
                     html.H4("👥 Demand Analysis", className="alert-heading"),
                     html.P(
-                        "Use the filters above to change the view. Each chart has its own forecast toggle (ETS with 95% CI)."
+                        "This tab breaks down patient demand in detail. It tracks referrals, waiting lists, caseload, contacts, and discharges "
+                        "over time, alongside a summary table showing service-level performance against targets. "
+                        "The Clinician Patient Facing Time filter sets the target threshold used in the demand summary table."
                     ),
                     html.P(
-                        "Forecasting note: ETS / exponential smoothing (Holt-Winters) works best with enough history to learn seasonality. "
-                        "For monthly data, adjust the date selector to 2-3 years (~24-36 points) when forecasting."
+                        "Each chart includes a forecast toggle using ETS (Holt-Winters Exponential Smoothing) with a 95% confidence interval. "
+                        "For best results, include at least 2 years of data when using forecasts."
                     ),
                 ],
                 color="info",
@@ -3307,8 +3310,13 @@ def create_capacity_tab(df):
                 [
                     html.H4("💼 Capacity Analysis", className="alert-heading"),
                     html.P(
-                        "Capacity visuals are based on the currently selected provider(s). "
-                        "Use the filters above to change the view."
+                        "This tab shows workforce capacity for the selected services. "
+                        "It displays staffing levels broken down by staff group (e.g. qualified, unqualified, support) "
+                        "and service line, helping identify where workforce gaps may exist relative to demand."
+                    ),
+                    html.P(
+                        "Use the filters above to focus on specific providers or service lines. "
+                        "The staffing table at the bottom provides a detailed breakdown of staff numbers."
                     ),
                     staffing_error if staffing_error is not None else None,
                 ],
