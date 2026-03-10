@@ -1566,6 +1566,10 @@ app.layout = dbc.Container(
                             id="main-tabs",
                             value="overview-tab",
                             children=[
+                                dcc.Tab(
+                                    label="ℹ️ About This Dashboard",
+                                    value="about-tab",
+                                ),
                                 dcc.Tab(label="📈 Overview", value="overview-tab"),
                                 dcc.Tab(label="👥 Demand Analysis", value="demand-tab"),
                                 dcc.Tab(
@@ -1833,13 +1837,16 @@ def update_tab_content(active_tab, data_json, demand_percentile):
     """Render the selected tab content.
 
     Args:
-        active_tab: Selected tab ID ("overview-tab", "demand-tab", "capacity-tab").
+        active_tab: Selected tab ID ("about-tab", "overview-tab", "demand-tab", "capacity-tab").
         data_json: JSON-encoded DataFrame (orient="split") from dcc.Store.
 
     Returns:
         A Dash component containing the tab content (charts/tables), or an alert
         div if data is missing/empty.
     """
+    if active_tab == "about-tab":
+        return create_about_tab()
+
     if data_json is None:
         return html.Div(
             "No data available. Click 'Apply Filters' to load data.",
@@ -3335,6 +3342,249 @@ def create_capacity_tab(df):
                     ),
                 ],
                 className="mb-4",
+            ),
+        ]
+    )
+
+
+def create_about_tab():
+    """Create the About This Dashboard tab with full methodology and guidance."""
+
+    return html.Div(
+        [
+            dbc.Alert(
+                [
+                    html.H4("ℹ️ About This Dashboard", className="alert-heading"),
+                    html.P(
+                        "This page explains what the dashboard does, how its metrics are calculated, "
+                        "and how to interpret the data across each tab."
+                    ),
+                ],
+                color="info",
+                className="mt-4",
+            ),
+            # --- Purpose ---
+            dbc.Card(
+                [
+                    dbc.CardHeader(html.H5("Purpose", className="mb-0")),
+                    dbc.CardBody(
+                        [
+                            html.P(
+                                "This dashboard provides a data-driven view of demand, activity, and capacity across "
+                                "NHFT's community and mental health services. It is designed to support operational managers, "
+                                "service leads, and the Business Intelligence Service in understanding service pressures, "
+                                "identifying trends, and making informed planning decisions."
+                            ),
+                            html.P(
+                                "The platform tracks the full patient pathway from referral through to discharge and "
+                                "provides standardised metrics across all active service lines. It brings together referral demand, "
+                                "waiting list position, contact activity, caseload size, and discharge throughput into a single "
+                                "platform, enabling services to be compared on a consistent basis."
+                            ),
+                        ]
+                    ),
+                ],
+                className="mb-4 shadow-sm",
+            ),
+            # --- How Demand Is Measured ---
+            dbc.Card(
+                [
+                    dbc.CardHeader(html.H5("How Demand Is Measured", className="mb-0")),
+                    dbc.CardBody(
+                        [
+                            html.P(
+                                "At the heart of the model is a demand benchmarking approach. Rather than relying on fixed "
+                                "capacity targets (which require workforce data that is not currently available at the required "
+                                "granularity), the model uses a configurable Clinician Patient Facing Time parameter to derive a "
+                                "Clock Stop Target for each service line."
+                            ),
+                            html.P(
+                                "This target represents the referral volume at a chosen percentile of each service's own history. "
+                                "For example, at the 60th percentile, the target is the monthly referral volume that 60% of "
+                                "historical months fall at or below."
+                            ),
+                            html.P(
+                                [
+                                    html.Strong("Demand Ratio"),
+                                    " is then calculated by comparing actual throughput (first contacts and non-clock-stop "
+                                    "discharges) against this target. A ratio of 100% or above indicates the service is keeping "
+                                    "pace with demand; below 100% suggests a growing gap.",
+                                ]
+                            ),
+                            html.P(
+                                [
+                                    html.Strong("Sustainable Caseload"),
+                                    " extends this framework by applying the Demand Ratio to the current caseload size, "
+                                    "estimating how many patients the service can realistically sustain at its current throughput.",
+                                ]
+                            ),
+                        ]
+                    ),
+                ],
+                className="mb-4 shadow-sm",
+            ),
+            # --- Key Operational Metrics ---
+            dbc.Card(
+                [
+                    dbc.CardHeader(
+                        html.H5("Key Operational Metrics", className="mb-0")
+                    ),
+                    dbc.CardBody(
+                        [
+                            html.H6(
+                                "Caseload Throughput Rate", className="fw-bold mt-2"
+                            ),
+                            html.P(
+                                "Measures the proportion of the caseload that is discharged each month. A higher rate indicates "
+                                "patients are flowing through the service more actively; a declining rate suggests patients are "
+                                "accumulating on the caseload without being discharged, which compounds capacity pressure over time."
+                            ),
+                            html.H6("Net Caseload Flow", className="fw-bold mt-3"),
+                            html.P(
+                                "Shows the monthly balance of patients entering the caseload (via first contacts) against those "
+                                "leaving (via all discharge types). A positive value means the caseload is growing; a negative "
+                                "value means it is shrinking. Persistent positive flow, combined with a low throughput rate, "
+                                "signals that the service is heading towards an unsustainably large caseload."
+                            ),
+                            html.H6("Clearance Time", className="fw-bold mt-3"),
+                            html.P(
+                                "Estimates the number of weeks it would take to clear the current waiting list if no new referrals "
+                                "were received, based on the latest month's rate of first contacts. A rising clearance time indicates "
+                                "the waiting list is growing faster than the service can process it. This metric is particularly "
+                                "useful for identifying services where capacity is insufficient to prevent waiting list deterioration."
+                            ),
+                        ]
+                    ),
+                ],
+                className="mb-4 shadow-sm",
+            ),
+            # --- Tabs in the Dashboard ---
+            dbc.Card(
+                [
+                    dbc.CardHeader(html.H5("Tabs in the Dashboard", className="mb-0")),
+                    dbc.CardBody(
+                        [
+                            html.H6("\U0001f4c8 Overview", className="fw-bold mt-2"),
+                            html.P(
+                                "Provides a high-level summary of service demand and capacity. KPI cards show the latest month's "
+                                "headline figures while time series charts track referrals, waiters, caseload, contacts, and "
+                                "discharges over time. A staff-vs-caseload scatter plot and a waiting list breakdown (under vs "
+                                "over 18 weeks) provide additional operational context."
+                            ),
+                            html.H6(
+                                "\U0001f465 Demand Analysis", className="fw-bold mt-3"
+                            ),
+                            html.P(
+                                "Breaks down patient demand in detail with individual time series for each metric, each with "
+                                "its own forecast toggle. A waiting list breakdown by time band is shown alongside a service-level "
+                                "summary table that includes the Clock Stop Target (driven by the Clinician Patient Facing Time "
+                                "filter), demand ratios, and contacts-per-caseload metrics where source data exists."
+                            ),
+                            html.H6(
+                                "\U0001f4bc Capacity Analysis", className="fw-bold mt-3"
+                            ),
+                            html.P(
+                                "Shows workforce capacity for the selected services, broken down by staff group and service line. "
+                                "Due to current data constraints (see Data Limitations below), this tab presents capacity as a "
+                                "reference view rather than a fully integrated demand-capacity model. It can be used to triangulate "
+                                "demand signals with available workforce context."
+                            ),
+                        ]
+                    ),
+                ],
+                className="mb-4 shadow-sm",
+            ),
+            # --- Forecasting ---
+            dbc.Card(
+                [
+                    dbc.CardHeader(html.H5("Forecasting", className="mb-0")),
+                    dbc.CardBody(
+                        [
+                            html.P(
+                                "Each chart includes an optional forecast toggle that generates a 6-month projection using "
+                                "Exponential Smoothing (ETS / Holt-Winters) with a 95% confidence interval. Forecasts are "
+                                "intended to support proactive planning rather than replace clinical judgement."
+                            ),
+                            html.P(
+                                "For best results, include at least 2\u20133 years of data (24\u201336 monthly data points) in the "
+                                "date filter so the model has enough history to learn seasonal patterns."
+                            ),
+                        ]
+                    ),
+                ],
+                className="mb-4 shadow-sm",
+            ),
+            # --- Data & Refresh ---
+            dbc.Card(
+                [
+                    dbc.CardHeader(html.H5("Data Sources & Refresh", className="mb-0")),
+                    dbc.CardBody(
+                        [
+                            html.P(
+                                "Data is sourced from the NHFT Data Warehouse. Following each refresh, the dashboard "
+                                "presents activity up to the last fully completed reporting month, in line with the Trust's "
+                                "standard monthly reporting cycle."
+                            ),
+                            html.H6("Service Line Mapping", className="fw-bold mt-3"),
+                            html.P(
+                                "Patient-level data is mapped to service lines via the configuration table "
+                                "[MIS_Config].[dbo].[tbl_org_current_RL9_Service_Line]. Only services flagged as Active and "
+                                "RTT Report Enabled are included. Provider codes 996 and 998 are excluded."
+                            ),
+                        ]
+                    ),
+                ],
+                className="mb-4 shadow-sm",
+            ),
+            # --- Data Limitations ---
+            dbc.Card(
+                [
+                    dbc.CardHeader(
+                        html.H5(
+                            "Data Limitations, Triangulation & Capacity Approach",
+                            className="mb-0",
+                        )
+                    ),
+                    dbc.CardBody(
+                        [
+                            html.P(
+                                "During development, two practical constraints were identified that materially shape "
+                                "the modelling approach:"
+                            ),
+                            html.Ul(
+                                [
+                                    html.Li(
+                                        [
+                                            html.Strong(
+                                                "No historical workforce time series: "
+                                            ),
+                                            "Due to extraction limitations, historical staffing data was not obtainable at the "
+                                            "required granularity. The staffing dataset is therefore a current snapshot only "
+                                            "(no month-by-month staffing history).",
+                                        ]
+                                    ),
+                                    html.Li(
+                                        [
+                                            html.Strong(
+                                                "Staff vs patient service line misalignment: "
+                                            ),
+                                            "Patient activity and workforce data do not naturally align by service line because "
+                                            "service definitions are represented differently across systems (e.g. service lines vs "
+                                            "cost centres / organisational hierarchies).",
+                                        ]
+                                    ),
+                                ]
+                            ),
+                            html.P(
+                                "As a result, the Capacity tab is implemented as a reference view (staff mix, staff by "
+                                "service line), providing contextual workforce information rather than a fully time-aligned "
+                                "capacity model. The project focuses on demand-based benchmarking using demand percentiles, "
+                                "with the staffing snapshot providing supplementary capacity signals."
+                            ),
+                        ]
+                    ),
+                ],
+                className="mb-4 shadow-sm",
             ),
         ]
     )
