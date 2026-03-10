@@ -45,7 +45,7 @@ from forecasting.ets import EtsSpec, small_grid_search_aic_ets
 # small in-memory cache of selected model specs and forecast frames keyed by the
 # input series signature.
 #
-# NOTE: If the design requiresETS to re-run on every callback (no caching), set this to False.
+# If the design requiresETS to re-run on every callback (no caching), set this to False.
 ETS_CACHE_ENABLED = False
 _FORECAST_CACHE_MAX = 64
 _SPEC_CACHE_MAX = 128
@@ -53,6 +53,7 @@ _forecast_frame_cache: "OrderedDict[tuple, pd.DataFrame]" = OrderedDict()
 _best_spec_cache: "OrderedDict[tuple, EtsSpec]" = OrderedDict()
 
 
+# Forecast cache helper used to keep chart callbacks responsive.
 def _lru_get(cache: OrderedDict, key):
     if key in cache:
         cache.move_to_end(key)
@@ -60,6 +61,7 @@ def _lru_get(cache: OrderedDict, key):
     return None
 
 
+# Forecast cache helper used to keep chart callbacks responsive.
 def _lru_set(cache: OrderedDict, key, value, *, maxsize: int):
     cache[key] = value
     cache.move_to_end(key)
@@ -67,6 +69,7 @@ def _lru_set(cache: OrderedDict, key, value, *, maxsize: int):
         cache.popitem(last=False)
 
 
+# Forecast cache helper used to keep chart callbacks responsive.
 def _series_signature(y: pd.Series) -> tuple:
     """Return a stable, hashable signature for a monthly time series."""
     y = y.sort_index()
@@ -109,6 +112,7 @@ app = dash.Dash(
 # ---------------------------------------------------------------------
 # Helper Functions
 # ---------------------------------------------------------------------
+# Convert technical column names into user-friendly labels.
 def prettify_column_name(column_id: str) -> str:
     """Format column headers into user-friendly table headers.
 
@@ -147,6 +151,7 @@ def prettify_column_name(column_id: str) -> str:
     return " ".join(pretty_parts)
 
 
+# Format raw values into display-ready KPI text.
 def _format_provider_code_current(series: pd.Series) -> pd.Series:
     """Normalise provider codes to a 3-digit string (e.g. 6 -> '006').
 
@@ -169,6 +174,7 @@ def _format_provider_code_current(series: pd.Series) -> pd.Series:
     return s.mask(to_pad, s.str.zfill(3))
 
 
+# Read and normalize data from app state storage.
 def _read_filtered_store_frame(data_json: str) -> pd.DataFrame:
     """Read the filtered patient frame from dcc.Store and normalise key dtypes."""
 
@@ -185,6 +191,7 @@ def _read_filtered_store_frame(data_json: str) -> pd.DataFrame:
     return df
 
 
+# Build and return a dashboard layout section or component.
 def create_metric_card(
     title: str,
     value: str,
@@ -231,6 +238,7 @@ def create_metric_card(
     )
 
 
+# Internal helper for shared dashboard logic.
 def _rgba(color: str, alpha: float) -> str:
     """Convert a Plotly colour string (hex or rgb) to an rgba string."""
     c = str(color).strip()
@@ -257,6 +265,7 @@ def _rgba(color: str, alpha: float) -> str:
     return f"rgba(0,0,0,{a})"
 
 
+# Format raw values into display-ready KPI text.
 def _format_int_card_value(value: Optional[float]) -> str:
     """Format a numeric KPI value for display, or return 'N/A'."""
 
@@ -273,6 +282,7 @@ def _format_int_card_value(value: Optional[float]) -> str:
         return "N/A"
 
 
+# Format raw values into display-ready KPI text.
 def _format_ratio_card_value(value: Optional[float], *, decimals: int = 3) -> str:
     """Format a ratio KPI value for display, or return 'N/A'."""
 
@@ -296,6 +306,7 @@ def _format_ratio_card_value(value: Optional[float], *, decimals: int = 3) -> st
     return f"{x:.{d}f}"
 
 
+# Format raw values into display-ready KPI text.
 def _format_percent_card_value(value: Optional[float], *, decimals: int = 1) -> str:
     """Format a proportion (0..1) as a percentage for KPI display, or 'N/A'."""
 
@@ -319,6 +330,7 @@ def _format_percent_card_value(value: Optional[float], *, decimals: int = 1) -> 
     return f"{x * 100:.{d}f}%"
 
 
+# Format raw values into display-ready KPI text.
 def _format_signed_int_card_value(value: Optional[float]) -> str:
     """Format a signed integer KPI value for display, or return 'N/A'."""
 
@@ -344,6 +356,7 @@ def _format_signed_int_card_value(value: Optional[float]) -> str:
     return f"{n:,}"
 
 
+# Compute a derived KPI from the current filtered dataset.
 def _compute_net_caseload_flow_latest(df: pd.DataFrame) -> Optional[float]:
     """Compute latest-month net flow = inflow - outflow.
 
@@ -408,6 +421,7 @@ def _compute_net_caseload_flow_latest(df: pd.DataFrame) -> Optional[float]:
     return float(inflow) - float(outflow)
 
 
+# Compute a derived KPI from the current filtered dataset.
 def _compute_caseload_throughput_rate_latest(df: pd.DataFrame) -> Optional[float]:
     """Compute latest-month caseload throughput rate = outflow / caseload.
 
@@ -472,6 +486,7 @@ def _compute_caseload_throughput_rate_latest(df: pd.DataFrame) -> Optional[float
     return float(outflow) / float(caseload)
 
 
+# Compute a derived KPI from the current filtered dataset.
 def _compute_clearance_time_weeks_latest(
     df: pd.DataFrame,
     *,
@@ -540,6 +555,7 @@ def _compute_clearance_time_weeks_latest(
     return clearance_weeks
 
 
+# Compute a derived KPI from the current filtered dataset.
 def _compute_demand_ratio_latest(
     df: pd.DataFrame,
     *,
@@ -636,6 +652,7 @@ def _compute_demand_ratio_latest(
     return out
 
 
+# Compute a derived KPI from the current filtered dataset.
 def _compute_sustainable_caseload_latest(
     df: pd.DataFrame,
     *,
@@ -756,6 +773,7 @@ def _compute_sustainable_caseload_latest(
     return float(latest_caseload) / float(demand_ratio_latest)
 
 
+# Build and return a dashboard layout section or component.
 def create_filter_section():
     """Create the top-of-page filter controls.
 
@@ -934,6 +952,7 @@ def create_filter_section():
     )
 
 
+# Build a monthly-indexed time series for charting and forecasts.
 def _monthly_series_from_filtered_df(df: pd.DataFrame, metric: str) -> pd.Series:
     """Build a month-end indexed series for a single metric from the filtered dataset."""
     if df is None or df.empty:
@@ -963,6 +982,7 @@ def _monthly_series_from_filtered_df(df: pd.DataFrame, metric: str) -> pd.Series
     return y
 
 
+# Build a metric-specific chart, optionally with forecast overlay.
 def _metric_timeseries_figure(
     *,
     df: pd.DataFrame,
@@ -1202,6 +1222,7 @@ def _metric_timeseries_figure(
     return fig
 
 
+# Helper that prepares the Overview tab visual output.
 def _overview_key_metrics_figure(
     *,
     df: pd.DataFrame,
@@ -1613,6 +1634,7 @@ app.layout = dbc.Container(
         State("service-line-dropdown", "value"),
     ],
 )
+# Internal helper for shared dashboard logic.
 def filter_data(n_clicks, slider_range, slider_dates, service_lines):
     """Filter patient data based on the UI controls.
 
@@ -1685,6 +1707,7 @@ def filter_data(n_clicks, slider_range, slider_dates, service_lines):
     [Input("date-range-slider", "value")],
     [State("date-slider-dates", "data")],
 )
+# Callback handler that updates UI output from current inputs.
 def update_date_slider_label(slider_range, slider_dates):
     if (
         not slider_dates
@@ -1711,6 +1734,7 @@ def update_date_slider_label(slider_range, slider_dates):
 @app.callback(
     Output("summary-stats-row", "children"), [Input("filtered-data-store", "data")]
 )
+# Callback handler that updates UI output from current inputs.
 def update_summary_stats(data_json):
     """Update the KPI cards row based on the filtered dataset.
 
@@ -1800,6 +1824,7 @@ def update_summary_stats(data_json):
 @app.callback(
     Output("footer-content", "children"), [Input("filtered-data-store", "data")]
 )
+# Callback handler that updates UI output from current inputs.
 def update_footer(data_json):
     """Update footer text, including the latest reporting period end date.
 
@@ -1837,6 +1862,7 @@ def update_footer(data_json):
         Input("demand-percentile-dropdown", "value"),
     ],
 )
+# Callback handler that updates UI output from current inputs.
 def update_tab_content(active_tab, data_json, demand_percentile):
     """Render the selected tab content.
 
@@ -1875,6 +1901,7 @@ def update_tab_content(active_tab, data_json, demand_percentile):
     return html.Div("Invalid tab selection")
 
 
+# Build and return a dashboard layout section or component.
 def create_overview_tab(df, *, demand_percentile: Optional[int | float] = 60):
     """Create the Overview tab layout.
 
@@ -2075,6 +2102,7 @@ def create_overview_tab(df, *, demand_percentile: Optional[int | float] = 60):
     )
 
 
+# Internal helper for shared dashboard logic.
 def _waiters_18wk_breakdown_figure(
     df_sorted: pd.DataFrame,
     *,
@@ -2170,6 +2198,7 @@ def _waiters_18wk_breakdown_figure(
         Input("overview-keymetrics-visible-metrics", "data"),
     ],
 )
+# Callback handler that updates UI output from current inputs.
 def update_overview_keymetrics_timeseries(data_json, forecast_on, visible_metrics):
     if data_json is None:
         return go.Figure()
@@ -2192,6 +2221,7 @@ def update_overview_keymetrics_timeseries(data_json, forecast_on, visible_metric
     State("overview-keymetrics-visible-metrics", "data"),
     prevent_initial_call=True,
 )
+# Callback handler that updates UI output from current inputs.
 def update_overview_keymetrics_visible_metrics(restyle_data, fig, current_visible):
     """Maintain a list of legend-visible metric keys for the Overview chart.
 
@@ -2243,6 +2273,7 @@ def update_overview_keymetrics_visible_metrics(restyle_data, fig, current_visibl
     Output("referrals-timeseries", "figure"),
     [Input("filtered-data-store", "data"), Input("referrals-forecast-toggle", "value")],
 )
+# Callback handler that updates UI output from current inputs.
 def update_referrals_timeseries(data_json, forecast_on):
     if data_json is None:
         return go.Figure()
@@ -2264,6 +2295,7 @@ def update_referrals_timeseries(data_json, forecast_on):
     Output("waiters-timeseries", "figure"),
     [Input("filtered-data-store", "data"), Input("waiters-forecast-toggle", "value")],
 )
+# Callback handler that updates UI output from current inputs.
 def update_waiters_timeseries(data_json, forecast_on):
     if data_json is None:
         return go.Figure()
@@ -2285,6 +2317,7 @@ def update_waiters_timeseries(data_json, forecast_on):
     Output("caseload-timeseries", "figure"),
     [Input("filtered-data-store", "data"), Input("caseload-forecast-toggle", "value")],
 )
+# Callback handler that updates UI output from current inputs.
 def update_caseload_timeseries(data_json, forecast_on):
     if data_json is None:
         return go.Figure()
@@ -2306,6 +2339,7 @@ def update_caseload_timeseries(data_json, forecast_on):
     Output("contacts-timeseries", "figure"),
     [Input("filtered-data-store", "data"), Input("contacts-forecast-toggle", "value")],
 )
+# Callback handler that updates UI output from current inputs.
 def update_contacts_timeseries(data_json, forecast_on):
     if data_json is None:
         return go.Figure()
@@ -2330,6 +2364,7 @@ def update_contacts_timeseries(data_json, forecast_on):
         Input("discharges-forecast-toggle", "value"),
     ],
 )
+# Callback handler that updates UI output from current inputs.
 def update_discharges_timeseries(data_json, forecast_on):
     if data_json is None:
         return go.Figure()
@@ -2347,6 +2382,7 @@ def update_discharges_timeseries(data_json, forecast_on):
     )
 
 
+# Build and return a dashboard layout section or component.
 def create_service_line_summary_table(df: pd.DataFrame):
     """Create the patient summary DataTable by provider code and service line.
 
@@ -2409,6 +2445,7 @@ def create_service_line_summary_table(df: pd.DataFrame):
     )
 
 
+# Internal helper for shared dashboard logic.
 def _build_demand_summary_table_frame(
     df: pd.DataFrame,
     *,
@@ -2613,6 +2650,7 @@ def _build_demand_summary_table_frame(
         Input("demand-percentile-dropdown", "value"),
     ],
 )
+# Callback handler that updates UI output from current inputs.
 def update_patient_summary_table(data_json, demand_percentile):
     """Recalculate Demand Analysis table metrics when filters change."""
     if data_json is None:
@@ -2637,6 +2675,7 @@ def update_patient_summary_table(data_json, demand_percentile):
     return summary_df.to_dict("records"), columns
 
 
+# Build and return a dashboard layout section or component.
 def create_staffing_pivot_table(
     patient_df: pd.DataFrame,
     staffing_df: Optional[pd.DataFrame],
@@ -2771,6 +2810,7 @@ def create_staffing_pivot_table(
     )
 
 
+# Helper used by Capacity Analysis charts and tables.
 def _capacity_filter_staffing(
     patient_df: pd.DataFrame,
     staffing_df: Optional[pd.DataFrame],
@@ -2826,6 +2866,7 @@ def _capacity_filter_staffing(
     return staffing_filtered, None
 
 
+# Helper used by Capacity Analysis charts and tables.
 def _capacity_style_figure(fig: go.Figure) -> go.Figure:
     """Apply a consistent, dashboard-friendly Plotly style."""
     fig.update_layout(
@@ -2847,6 +2888,7 @@ def _capacity_style_figure(fig: go.Figure) -> go.Figure:
     return fig
 
 
+# Helper used by Capacity Analysis charts and tables.
 def _capacity_staff_mix_by_group_figure(staffing_filtered: pd.DataFrame) -> go.Figure:
     by_group = (
         staffing_filtered.groupby("staff_group", as_index=False)
@@ -2865,6 +2907,7 @@ def _capacity_staff_mix_by_group_figure(staffing_filtered: pd.DataFrame) -> go.F
     return _capacity_style_figure(fig)
 
 
+# Helper used by Capacity Analysis charts and tables.
 def _capacity_staff_by_service_line_figure(
     staffing_filtered: pd.DataFrame,
 ) -> go.Figure:
@@ -2913,6 +2956,7 @@ def _capacity_staff_by_service_line_figure(
     return _capacity_style_figure(fig)
 
 
+# Helper used by Capacity Analysis charts and tables.
 def _capacity_staff_vs_caseload_latest_figure(
     patient_df: pd.DataFrame,
     staffing_filtered: pd.DataFrame,
@@ -3008,6 +3052,7 @@ def _capacity_staff_vs_caseload_latest_figure(
     return _capacity_style_figure(fig)
 
 
+# Build and return a dashboard layout section or component.
 def create_demand_tab(df, *, demand_percentile: Optional[int | float] = 60):
     """Create the Demand tab layout.
 
@@ -3222,6 +3267,7 @@ def create_demand_tab(df, *, demand_percentile: Optional[int | float] = 60):
     )
 
 
+# Build and return a dashboard layout section or component.
 def create_capacity_tab(df):
     """Create the Capacity tab layout.
 
@@ -3355,6 +3401,7 @@ def create_capacity_tab(df):
     )
 
 
+# Build and return a dashboard layout section or component.
 def create_about_tab():
     """Create the About This Dashboard tab with full methodology and guidance."""
 
