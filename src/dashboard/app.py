@@ -2023,7 +2023,7 @@ def create_overview_tab(df, *, demand_percentile: Optional[int | float] = 60):
             dbc.Col(
                 create_metric_card(
                     "Demand Ratio",
-                    _format_ratio_card_value(demand_ratio_latest, decimals=3),
+                    _format_percent_card_value(demand_ratio_latest, decimals=1),
                     "⚖️",
                     "primary",
                     description="Total throughput vs target. 100% and above means demand was met last month",
@@ -3132,7 +3132,7 @@ def create_demand_tab(df, *, demand_percentile: Optional[int | float] = 60):
             dbc.Col(
                 create_metric_card(
                     "Demand Ratio",
-                    _format_ratio_card_value(demand_ratio_latest, decimals=3),
+                    _format_percent_card_value(demand_ratio_latest, decimals=1),
                     "⚖️",
                     "primary",
                     description="Total throughput vs target. 100% and above means demand was met last month",
