@@ -617,6 +617,8 @@ def _compute_demand_ratio_latest(
     if by_service.empty:
         return None
 
+    # Aggregate at trust-filter level: ratio of totals (not mean of service ratios)
+    # so larger services are weighted by their target volumes.
     numer = (
         pd.to_numeric(by_service["clock_stop_actuals"], errors="coerce").fillna(0)
         + pd.to_numeric(by_service["discharges_no_clock_stop"], errors="coerce").fillna(
@@ -742,6 +744,8 @@ def _compute_sustainable_caseload_latest(
     if not np.isfinite(numer) or not np.isfinite(denom) or float(denom) <= 0:
         return None
 
+    # Invert the latest demand ratio to estimate caseload level at DR=1.0:
+    # sustainable_caseload = current_caseload / demand_ratio_latest.
     demand_ratio_latest = float(numer) / float(denom)
     if not np.isfinite(demand_ratio_latest) or demand_ratio_latest <= 0:
         return None
@@ -1844,6 +1848,7 @@ def update_tab_content(active_tab, data_json, demand_percentile):
         A Dash component containing the tab content (charts/tables), or an alert
         div if data is missing/empty.
     """
+    # Keep the About tab accessible even before filters are applied.
     if active_tab == "about-tab":
         return create_about_tab()
 
@@ -2484,8 +2489,8 @@ def _build_demand_summary_table_frame(
         else:
             summary_df["waiters_under_18_weeks"] = calc_under_18
 
-    # Clock Stop Target: percentile of historical monthly referrals for the service line.
-    # Target remains constant across periods within the table.
+    # Clock Stop Target is computed once per service_line from full filtered history,
+    # then repeated across monthly rows to provide a stable benchmark line.
     if {"service_line", "referrals", "period_end"}.issubset(base.columns):
         ref_base = base[["service_line", "period_end", "referrals"]].copy()
         ref_base["referrals"] = pd.to_numeric(ref_base["referrals"], errors="coerce")
@@ -2510,6 +2515,7 @@ def _build_demand_summary_table_frame(
         numer_n = pd.to_numeric(numer, errors="coerce")
         denom_n = pd.to_numeric(denom, errors="coerce")
         out = numer_n / denom_n
+        # Ratios are undefined when target/caseload is zero or missing.
         out = out.where(denom_n > 0)
         return out
 
@@ -2943,6 +2949,8 @@ def _capacity_staff_vs_caseload_latest_figure(
         ["provider_code_current", "service_line"], as_index=False
     ).agg(staff=("staff", "sum"))
 
+    # Inner join keeps only provider/service pairs present in both patient
+    # demand and staffing snapshots for like-for-like comparison.
     merged = demand_latest.merge(
         staff_totals,
         on=["provider_code_current", "service_line"],
