@@ -1976,29 +1976,19 @@ def create_overview_tab(df, *, demand_percentile: Optional[int | float] = 60):
         [
             dbc.Col(
                 create_metric_card(
-                    "Sustainable Caseload",
-                    _format_int_card_value(sustainable_caseload),
-                    "🌿",
-                    "success",
-                ),
-                xs=12,
-                sm=6,
-                md=4,
-                lg=2,
-                style={"minWidth": "220px"},
-            ),
-            dbc.Col(
-                create_metric_card(
                     "Demand Ratio",
                     _format_ratio_card_value(demand_ratio_latest, decimals=3),
                     "⚖️",
                     "primary",
                 ),
-                xs=12,
-                sm=6,
-                md=4,
-                lg=2,
-                style={"minWidth": "220px"},
+            ),
+            dbc.Col(
+                create_metric_card(
+                    "Sustainable Caseload",
+                    _format_int_card_value(sustainable_caseload),
+                    "🌿",
+                    "success",
+                ),
             ),
             dbc.Col(
                 create_metric_card(
@@ -2007,11 +1997,6 @@ def create_overview_tab(df, *, demand_percentile: Optional[int | float] = 60):
                     "🔄",
                     "warning",
                 ),
-                xs=12,
-                sm=6,
-                md=4,
-                lg=2,
-                style={"minWidth": "220px"},
             ),
             dbc.Col(
                 create_metric_card(
@@ -2020,11 +2005,6 @@ def create_overview_tab(df, *, demand_percentile: Optional[int | float] = 60):
                     "♻️",
                     "info",
                 ),
-                xs=12,
-                sm=6,
-                md=4,
-                lg=2,
-                style={"minWidth": "220px"},
             ),
             dbc.Col(
                 create_metric_card(
@@ -2033,14 +2013,9 @@ def create_overview_tab(df, *, demand_percentile: Optional[int | float] = 60):
                     "🧹",
                     "secondary",
                 ),
-                xs=12,
-                sm=6,
-                md=4,
-                lg=2,
-                style={"minWidth": "220px"},
             ),
         ],
-        className="mb-4 justify-content-center g-3",
+        className="mb-4 justify-content-center",
     )
 
     # -----------------------------
@@ -3083,29 +3058,19 @@ def create_demand_tab(df, *, demand_percentile: Optional[int | float] = 60):
         [
             dbc.Col(
                 create_metric_card(
-                    "Sustainable Caseload",
-                    _format_int_card_value(sustainable_caseload),
-                    "🌿",
-                    "success",
-                ),
-                xs=12,
-                sm=6,
-                md=4,
-                lg=2,
-                style={"minWidth": "220px"},
-            ),
-            dbc.Col(
-                create_metric_card(
                     "Demand Ratio",
                     _format_ratio_card_value(demand_ratio_latest, decimals=3),
                     "⚖️",
                     "primary",
                 ),
-                xs=12,
-                sm=6,
-                md=4,
-                lg=2,
-                style={"minWidth": "220px"},
+            ),
+            dbc.Col(
+                create_metric_card(
+                    "Sustainable Caseload",
+                    _format_int_card_value(sustainable_caseload),
+                    "🌿",
+                    "success",
+                ),
             ),
             dbc.Col(
                 create_metric_card(
@@ -3114,11 +3079,6 @@ def create_demand_tab(df, *, demand_percentile: Optional[int | float] = 60):
                     "🔄",
                     "warning",
                 ),
-                xs=12,
-                sm=6,
-                md=4,
-                lg=2,
-                style={"minWidth": "220px"},
             ),
             dbc.Col(
                 create_metric_card(
@@ -3127,11 +3087,6 @@ def create_demand_tab(df, *, demand_percentile: Optional[int | float] = 60):
                     "♻️",
                     "info",
                 ),
-                xs=12,
-                sm=6,
-                md=4,
-                lg=2,
-                style={"minWidth": "220px"},
             ),
             dbc.Col(
                 create_metric_card(
@@ -3140,14 +3095,9 @@ def create_demand_tab(df, *, demand_percentile: Optional[int | float] = 60):
                     "🧹",
                     "secondary",
                 ),
-                xs=12,
-                sm=6,
-                md=4,
-                lg=2,
-                style={"minWidth": "220px"},
             ),
         ],
-        className="mb-4 justify-content-center g-3",
+        className="mb-4 justify-content-center",
     )
 
     return html.Div(
