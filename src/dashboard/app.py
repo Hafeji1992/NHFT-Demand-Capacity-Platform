@@ -882,7 +882,7 @@ def create_filter_section():
                         [
                             dbc.Col(
                                 html.Label(
-                                    "Demand Percentile:",
+                                    "Clinician Patient Facing Time:",
                                     className="fw-bold",
                                 ),
                                 width="auto",
