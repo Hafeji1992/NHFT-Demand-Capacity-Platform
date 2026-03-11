@@ -1,0 +1,347 @@
+/* ============================================================
+   NHS Design System Theme for NHFT Demand-Capacity Dashboard
+   Official NHS Colours: https://www.england.nhs.uk/nhsidentity/
+   ============================================================ */
+
+/* --- CSS Custom Properties (NHS Palette) --- */
+:root {
+    /* Primary */
+    --nhs-blue:         #005EB8;
+    --nhs-dark-blue:    #003087;
+    --nhs-bright-blue:  #0072CE;
+    --nhs-light-blue:   #41B6E6;
+    --nhs-aqua-green:   #00A499;
+
+    /* Neutrals */
+    --nhs-black:        #231F20;
+    --nhs-dark-grey:    #425563;
+    --nhs-mid-grey:     #768692;
+    --nhs-pale-grey:    #E8EDEE;
+    --nhs-white:        #FFFFFF;
+
+    /* Support / Alerts */
+    --nhs-green:        #007F3B;
+    --nhs-light-green:  #78BE20;
+    --nhs-yellow:       #FFB81C;
+    --nhs-orange:       #ED8B00;
+    --nhs-red:          #DA291C;
+    --nhs-dark-red:     #8A1538;
+    --nhs-pink:         #AE2573;
+    --nhs-purple:       #330072;
+
+    /* Typography */
+    --nhs-font:         "Frutiger", Arial, sans-serif;
+}
+
+/* --- Global --- */
+body {
+    font-family: var(--nhs-font);
+    background-color: #F0F4F5;
+    color: var(--nhs-black);
+    -webkit-font-smoothing: antialiased;
+}
+
+/* --- NHS Header Banner --- */
+.nhs-header {
+    background-color: var(--nhs-blue);
+    color: var(--nhs-white);
+    padding: 16px 24px;
+    border-bottom: 4px solid var(--nhs-dark-blue);
+}
+
+.nhs-header h1 {
+    font-size: 1.75rem;
+    font-weight: 700;
+    margin: 0;
+    letter-spacing: -0.02em;
+    color: var(--nhs-white);
+}
+
+.nhs-logo-wrapper {
+    position: relative;
+    display: inline-block;
+}
+
+.nhs-header .nhs-logo-img {
+    height: 48px;
+    filter: brightness(0) invert(1);
+    display: block;
+}
+
+.nhs-header .nhs-logo-overlay {
+    position: absolute;
+    top: 0;
+    right: 0;
+    height: 45%;
+    width: auto;
+    object-fit: contain;
+    object-position: right top;
+}
+
+/* --- Cards --- */
+.nhs-card {
+    border: none;
+    border-radius: 8px;
+    box-shadow: 0 1px 4px rgba(35, 31, 32, 0.08);
+    background: var(--nhs-white);
+    transition: box-shadow 0.2s ease;
+}
+
+.nhs-card:hover {
+    box-shadow: 0 2px 12px rgba(0, 94, 184, 0.12);
+}
+
+.nhs-card .card-header {
+    background-color: var(--nhs-blue);
+    color: var(--nhs-white);
+    font-weight: 600;
+    border-radius: 8px 8px 0 0 !important;
+    border-bottom: none;
+    padding: 12px 16px;
+}
+
+.nhs-card .card-header h5 {
+    color: var(--nhs-white);
+    margin: 0;
+    font-weight: 600;
+    font-size: 1rem;
+}
+
+.nhs-card .card-body {
+    padding: 16px;
+}
+
+/* --- KPI Metric Cards --- */
+.nhs-metric-card {
+    border: none;
+    border-radius: 8px;
+    box-shadow: 0 1px 4px rgba(35, 31, 32, 0.08);
+    background: var(--nhs-white);
+    border-top: 4px solid var(--nhs-blue);
+    transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.nhs-metric-card:hover {
+    box-shadow: 0 4px 16px rgba(0, 94, 184, 0.15);
+    transform: translateY(-2px);
+}
+
+.nhs-metric-card .card-title {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--nhs-dark-grey);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.nhs-metric-card .metric-value {
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--nhs-blue);
+    text-align: center;
+    margin: 12px 0 4px;
+}
+
+.nhs-metric-card .metric-description {
+    font-size: 0.8rem;
+    color: var(--nhs-mid-grey);
+    text-align: center;
+    margin: 0;
+    line-height: 1.4;
+}
+
+/* Metric card border-top colour variants */
+.nhs-metric-card.nhs-metric-green  { border-top-color: var(--nhs-green); }
+.nhs-metric-card.nhs-metric-green .metric-value  { color: var(--nhs-green); }
+
+.nhs-metric-card.nhs-metric-yellow { border-top-color: var(--nhs-yellow); }
+.nhs-metric-card.nhs-metric-yellow .metric-value { color: var(--nhs-orange); }
+
+.nhs-metric-card.nhs-metric-aqua   { border-top-color: var(--nhs-aqua-green); }
+.nhs-metric-card.nhs-metric-aqua .metric-value   { color: var(--nhs-aqua-green); }
+
+.nhs-metric-card.nhs-metric-red    { border-top-color: var(--nhs-red); }
+.nhs-metric-card.nhs-metric-red .metric-value    { color: var(--nhs-red); }
+
+.nhs-metric-card.nhs-metric-dark   { border-top-color: var(--nhs-dark-grey); }
+.nhs-metric-card.nhs-metric-dark .metric-value   { color: var(--nhs-dark-grey); }
+
+.nhs-metric-card.nhs-metric-purple { border-top-color: var(--nhs-purple); }
+.nhs-metric-card.nhs-metric-purple .metric-value { color: var(--nhs-purple); }
+
+/* --- Tabs --- */
+.nhs-tabs .tab {
+    font-family: var(--nhs-font);
+    font-weight: 600;
+    color: var(--nhs-dark-grey) !important;
+    border: none !important;
+    border-bottom: 3px solid transparent !important;
+    background: transparent !important;
+    padding: 12px 20px !important;
+    transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.nhs-tabs .tab:hover {
+    color: var(--nhs-blue) !important;
+    border-bottom-color: var(--nhs-light-blue) !important;
+}
+
+.nhs-tabs .tab--selected {
+    color: var(--nhs-blue) !important;
+    border-bottom-color: var(--nhs-blue) !important;
+    background: transparent !important;
+}
+
+.nhs-tabs .tab-container {
+    border-bottom: 2px solid var(--nhs-pale-grey);
+}
+
+/* --- Buttons --- */
+.nhs-btn-primary {
+    background-color: var(--nhs-green) !important;
+    border-color: var(--nhs-green) !important;
+    color: var(--nhs-white) !important;
+    font-weight: 600;
+    border-radius: 4px;
+    padding: 8px 20px;
+    transition: background-color 0.15s ease;
+}
+
+.nhs-btn-primary:hover,
+.nhs-btn-primary:focus {
+    background-color: #00692f !important;
+    border-color: #00692f !important;
+}
+
+/* --- Filter Row --- */
+.nhs-filter-bar {
+    background: var(--nhs-white);
+    border: 1px solid var(--nhs-pale-grey);
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin-bottom: 20px;
+    box-shadow: 0 1px 3px rgba(35, 31, 32, 0.06);
+}
+
+.nhs-filter-bar label {
+    font-weight: 600;
+    color: var(--nhs-dark-grey);
+    font-size: 0.9rem;
+}
+
+/* --- Alert/Info Boxes --- */
+.nhs-info-box {
+    background-color: #E8EDEE;
+    border: none;
+    border-left: 4px solid var(--nhs-blue);
+    border-radius: 4px;
+    color: var(--nhs-black);
+    padding: 16px 20px;
+}
+
+.nhs-info-box .alert-heading {
+    color: var(--nhs-dark-blue);
+    font-weight: 700;
+}
+
+/* --- DataTable Overrides --- */
+.dash-table-container .dash-spreadsheet-container .dash-spreadsheet-inner th {
+    background-color: var(--nhs-blue) !important;
+    color: var(--nhs-white) !important;
+    font-weight: 600 !important;
+    font-size: 0.85rem;
+    border-bottom: 2px solid var(--nhs-dark-blue) !important;
+}
+
+.dash-table-container .dash-spreadsheet-container .dash-spreadsheet-inner td {
+    font-size: 0.85rem;
+    border-color: var(--nhs-pale-grey) !important;
+}
+
+.dash-table-container .dash-spreadsheet-container .dash-spreadsheet-inner tr:nth-child(odd) td {
+    background-color: #F7F9FA !important;
+}
+
+.dash-table-container .dash-spreadsheet-container .dash-spreadsheet-inner tr:hover td {
+    background-color: rgba(0, 94, 184, 0.06) !important;
+}
+
+/* --- Range Slider --- */
+.rc-slider-track {
+    background-color: var(--nhs-blue) !important;
+}
+
+.rc-slider-handle {
+    border-color: var(--nhs-blue) !important;
+}
+
+.rc-slider-handle:hover,
+.rc-slider-handle:focus {
+    border-color: var(--nhs-bright-blue) !important;
+    box-shadow: 0 0 0 4px rgba(0, 94, 184, 0.15) !important;
+}
+
+/* --- Dropdown --- */
+.Select-control {
+    border-color: var(--nhs-mid-grey) !important;
+    border-radius: 4px !important;
+}
+
+.Select-control:hover {
+    border-color: var(--nhs-blue) !important;
+}
+
+.Select.is-focused > .Select-control {
+    border-color: var(--nhs-blue) !important;
+    box-shadow: 0 0 0 3px rgba(0, 94, 184, 0.15) !important;
+}
+
+/* --- Footer --- */
+.nhs-footer {
+    background-color: var(--nhs-blue);
+    color: var(--nhs-white);
+    padding: 20px 0;
+    margin-top: 40px;
+    border-top: 4px solid var(--nhs-dark-blue);
+}
+
+.nhs-footer p {
+    color: rgba(255, 255, 255, 0.85);
+    margin: 0;
+    font-size: 0.85rem;
+}
+
+.nhs-footer strong {
+    color: var(--nhs-white);
+}
+
+/* --- Toggle Switch --- */
+.form-check-input:checked {
+    background-color: var(--nhs-blue) !important;
+    border-color: var(--nhs-blue) !important;
+}
+
+/* --- Scrollbar (Webkit) --- */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--nhs-pale-grey);
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--nhs-mid-grey);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--nhs-dark-grey);
+}
+
+/* --- Horizontal Rule --- */
+hr {
+    border-color: var(--nhs-pale-grey);
+    opacity: 1;
+}

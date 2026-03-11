@@ -12,7 +12,7 @@ pytest -q
 
 ---
 
-## 7.1 Compare Forecasts Against Actuals (RMSE/MAE) → Implemented as AIC (Model Selection)
+## 7.1 Compare Forecasts Against Actuals → Implemented as AIC (Model Selection)
 
 ### What I did
 Instead of implementing a full backtesting workflow with RMSE/MAE, the forecasting component performs **model selection using AIC (Akaike Information Criterion)**.

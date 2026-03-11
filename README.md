@@ -67,12 +67,16 @@ Future enhancement (dependent on improved workforce history + mapping):
 
 ### 4.4 Dash Application
 
-- Interactive visual dashboards
-- Tabs for Overview, Demand Analysis, and Capacity Analysis
-- Controls: date-range slider, service selection, percentile-based demand target setting, and per-chart forecast toggles
-- Accessible, interpretable design for operational managers
+Interactive web dashboard built with Plotly Dash and styled to the NHS Design System colour palette.
 
-For the current UI behaviour and data expectations, see `src/dashboard/README.md`.
+- **Four tabs:** About This Dashboard (methodology guide), Overview, Demand Analysis, and Capacity Analysis
+- **Filters:** month-based date-range slider, multi-select service dropdown, and a Clinician Patient Facing Time percentile selector (50–100%, default 60%) that drives demand benchmarking targets
+- **Headline KPI cards:** Referrals, Waiters, Caseload, Contacts, Discharges, Total Staff, plus derived metrics (Demand Ratio, Sustainable Caseload, Net Caseload Flow, Caseload Throughput, Clearance Time)
+- **Per-chart ETS forecast toggles:** optional 12-month Holt-Winters overlay with 95% confidence interval on each time-series chart
+- **Demand table:** service-line summary with Clock Stop Target, granular demand ratios, and contacts-per-caseload fields
+- **Capacity reference view:** staff-group and service-line bar charts, staff-vs-caseload scatter with trendline, and staffing pivot table
+
+For full UI behaviour, data expectations, and tab-by-tab detail see `src/dashboard/README.md`.
 
 ### 4.5 Data Limitations, Triangulation, and Capacity Approach
 
@@ -241,14 +245,14 @@ As defined in the Project Plan (Section 2, p. 1) :
 
 | Workstream / Phase                      | Status        | Target Completion | Completion Date | Hours Spent | Notes |
 |----------------------------------------|--------------|-------------------|-----------------|-------------|--------|
-| Project Documentation & Governance     | ✅ Completed | Early Dec 2025    | 08/12/2025      | 30          | Project Agreement, Plan, Methodology, Ethics & Legal all completed |
+| Project Documentation & Governance     | ✅ Completed | Early Dec 2025    | 08/12/2025      | 42          | Project Agreement, Plan, Methodology, Ethics & Legal all completed |
 | Data Access & Infrastructure Setup     | ✅ Completed | Mid Dec 2025      | 15/12/2025      | 15          | SQL access, governance approvals, secure Python environment |
 | Data Engineering & Automation Pipeline | ✅ Completed | Early Jan 2026    | 22/12/2025      | 30          | Direct-query pipeline, validation scripts, staffing & demand ingestion |
 | Forecasting Module (MVP)               | ✅ Completed  | Early Feb 2026    | 09/02/2026     | 97.5         | ETS forecasting utilities (dashboard default) + SARIMA retained under archived utilities |
-| Capacity & Simulation Module           | ✅ Completed (Re-scoped) | Mid Feb 2026      | 09/02/2026      | 7.5           | Pivoted (WC 09/02/2026): simulation/queueing de-scoped due to no workforce time series + service-line mapping misalignment; delivered reference-based capacity view (snapshot staffing mix/allocations) in dashboard |
-| Dash Application Development           | ✅ Completed   | End Feb 2026      | 19/02/2026    | 30           | Interactive dashboard (Overview/Demand/Capacity tabs, filters, percentile-based targets, derived tables, ETS forecast toggles; staffing snapshot used as reference) |
-| Testing, Validation & Refinement       | 📁 In Progress  | End Feb 2026      | —               | 7.5           | Forecast evaluation, stakeholder testing |
-| Documentation & Final Presentation Prep| ⏳ Upcoming  | June 2026         | —               | —           | Written portfolio, slides, video pitch |
+| Capacity & Simulation Module           | ✅ Completed (Re-scoped) | Mid Feb 2026      | 09/02/2026      | 30           | Pivoted (WC 09/02/2026): simulation/queueing de-scoped due to no workforce time series + service-line mapping misalignment; delivered reference-based capacity view (snapshot staffing mix/allocations) in dashboard |
+| Dash Application Development           | ✅ Completed   | End Feb 2026      | 19/02/2026    | 15           | Interactive dashboard (Overview/Demand/Capacity tabs, filters, percentile-based targets, derived tables, ETS forecast toggles; staffing snapshot used as reference) |
+| Testing, Validation & Refinement       | ✅ Completed  | End Feb 2026      | 09/03/2026     | 22.5           | Forecast evaluation, stakeholder testing |
+| Documentation & Final Presentation Prep| ⏳ Upcoming  | June 2026         | —               | 7.5           | Written portfolio, slides, video pitch |
 
 Milestones taken from the Project Plan timeline (Section 6, pp. 3–4) .
 

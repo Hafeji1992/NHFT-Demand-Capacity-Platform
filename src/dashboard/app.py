@@ -19,6 +19,13 @@ from plotly.subplots import make_subplots
 import pandas as pd
 import numpy as np
 
+# Ensure the dashboard folder is importable regardless of how the file is executed.
+# This supports launches like VS Code "Run Python File", `python src/dashboard/app.py`,
+# and `runpy.run_path(...)` where the script directory may not be on sys.path.
+DASHBOARD_DIR = Path(__file__).resolve().parent
+if str(DASHBOARD_DIR) not in sys.path:
+    sys.path.insert(0, str(DASHBOARD_DIR))
+
 from data_handler import get_data_handler, DataHandler
 
 # Allow imports from sibling folders under `src/` when running as:
@@ -38,7 +45,7 @@ from forecasting.ets import EtsSpec, small_grid_search_aic_ets
 # small in-memory cache of selected model specs and forecast frames keyed by the
 # input series signature.
 #
-# NOTE: If the design requiresETS to re-run on every callback (no caching), set this to False.
+# If the design requiresETS to re-run on every callback (no caching), set this to False.
 ETS_CACHE_ENABLED = False
 _FORECAST_CACHE_MAX = 64
 _SPEC_CACHE_MAX = 128
@@ -46,6 +53,7 @@ _forecast_frame_cache: "OrderedDict[tuple, pd.DataFrame]" = OrderedDict()
 _best_spec_cache: "OrderedDict[tuple, EtsSpec]" = OrderedDict()
 
 
+# Forecast cache helper used to keep chart callbacks responsive.
 def _lru_get(cache: OrderedDict, key):
     if key in cache:
         cache.move_to_end(key)
@@ -53,6 +61,7 @@ def _lru_get(cache: OrderedDict, key):
     return None
 
 
+# Forecast cache helper used to keep chart callbacks responsive.
 def _lru_set(cache: OrderedDict, key, value, *, maxsize: int):
     cache[key] = value
     cache.move_to_end(key)
@@ -60,6 +69,7 @@ def _lru_set(cache: OrderedDict, key, value, *, maxsize: int):
         cache.popitem(last=False)
 
 
+# Forecast cache helper used to keep chart callbacks responsive.
 def _series_signature(y: pd.Series) -> tuple:
     """Return a stable, hashable signature for a monthly time series."""
     y = y.sort_index()
@@ -90,18 +100,63 @@ except Exception as e:
 
 # ---------------------------------------------------------------------
 # Initialise Dash App
-# ---------------------------------------------------------------------
+import os
+from flask import send_from_directory
+
+# --- NHS Design System Colour Palette ---
+NHS_BLUE = "#005EB8"
+NHS_DARK_BLUE = "#003087"
+NHS_BRIGHT_BLUE = "#0072CE"
+NHS_LIGHT_BLUE = "#41B6E6"
+NHS_AQUA_GREEN = "#00A499"
+NHS_GREEN = "#007F3B"
+NHS_LIGHT_GREEN = "#78BE20"
+NHS_YELLOW = "#FFB81C"
+NHS_ORANGE = "#ED8B00"
+NHS_RED = "#DA291C"
+NHS_DARK_RED = "#8A1538"
+NHS_PINK = "#AE2573"
+NHS_PURPLE = "#330072"
+NHS_BLACK = "#231F20"
+NHS_DARK_GREY = "#425563"
+NHS_MID_GREY = "#768692"
+NHS_PALE_GREY = "#E8EDEE"
+NHS_WHITE = "#FFFFFF"
+
+# Plotly chart colour cycle using NHS palette
+NHS_CHART_COLOURS = [
+    NHS_BLUE,
+    NHS_RED,
+    NHS_AQUA_GREEN,
+    NHS_ORANGE,
+    NHS_PURPLE,
+    NHS_LIGHT_BLUE,
+    NHS_GREEN,
+    NHS_PINK,
+    NHS_YELLOW,
+    NHS_DARK_BLUE,
+]
+
 app = dash.Dash(
     __name__,
     external_stylesheets=[dbc.themes.BOOTSTRAP],
-    title="NHFT Demand-Capacity Dashboard",
+    title="NHFT Demand & Capacity Dashboard",
     suppress_callback_exceptions=True,
 )
+
+# Configure Flask to serve images folder
+images_dir = os.path.join(os.path.dirname(__file__), "../../images")
+
+
+@app.server.route("/images/<filename>")
+def serve_images(filename):
+    return send_from_directory(images_dir, filename)
 
 
 # ---------------------------------------------------------------------
 # Helper Functions
 # ---------------------------------------------------------------------
+# Convert technical column names into user-friendly labels.
 def prettify_column_name(column_id: str) -> str:
     """Format column headers into user-friendly table headers.
 
@@ -140,6 +195,7 @@ def prettify_column_name(column_id: str) -> str:
     return " ".join(pretty_parts)
 
 
+# Format raw values into display-ready KPI text.
 def _format_provider_code_current(series: pd.Series) -> pd.Series:
     """Normalise provider codes to a 3-digit string (e.g. 6 -> '006').
 
@@ -162,6 +218,7 @@ def _format_provider_code_current(series: pd.Series) -> pd.Series:
     return s.mask(to_pad, s.str.zfill(3))
 
 
+# Read and normalize data from app state storage.
 def _read_filtered_store_frame(data_json: str) -> pd.DataFrame:
     """Read the filtered patient frame from dcc.Store and normalise key dtypes."""
 
@@ -178,8 +235,25 @@ def _read_filtered_store_frame(data_json: str) -> pd.DataFrame:
     return df
 
 
+# Build and return a dashboard layout section or component.
+# Map logical colour names to NHS CSS modifier classes.
+_NHS_METRIC_CARD_CLASS = {
+    "primary": "",
+    "success": "nhs-metric-green",
+    "warning": "nhs-metric-yellow",
+    "info": "nhs-metric-aqua",
+    "danger": "nhs-metric-red",
+    "secondary": "nhs-metric-dark",
+    "dark": "nhs-metric-purple",
+}
+
+
 def create_metric_card(
-    title: str, value: str, icon: str = "📊", color: str = "primary"
+    title: str,
+    value: str,
+    icon: str = "📊",
+    color: str = "primary",
+    description: str = None,
 ):
     """Create a small KPI/metric card for the dashboard.
 
@@ -188,30 +262,38 @@ def create_metric_card(
         value: Pre-formatted value to display (e.g., "1,234").
         icon: Emoji/icon prefix for the title.
         color: Bootstrap theme colour name (e.g., "primary", "warning").
+        description: Optional description text to display below the value.
 
     Returns:
         A Dash Bootstrap Components Card.
     """
-    return dbc.Card(
-        [
-            dbc.CardBody(
-                [
-                    html.H4(
-                        [html.Span(icon, className="me-2"), title],
-                        className="card-title",
-                    ),
-                    html.H2(
-                        value,
-                        className="text-center mt-3",
-                        style={"color": f"var(--bs-{color})"},
-                    ),
-                ]
+    variant_cls = _NHS_METRIC_CARD_CLASS.get(color, "")
+    card_content = [
+        html.H4(
+            [html.Span(icon, className="me-2"), title],
+            className="card-title",
+        ),
+        html.H2(
+            value,
+            className="metric-value",
+        ),
+    ]
+
+    if description:
+        card_content.append(
+            html.P(
+                description,
+                className="metric-description",
             )
-        ],
-        className="mb-3 shadow-sm",
+        )
+
+    return dbc.Card(
+        [dbc.CardBody(card_content)],
+        className=f"nhs-metric-card mb-3 {variant_cls}".strip(),
     )
 
 
+# Internal helper for shared dashboard logic.
 def _rgba(color: str, alpha: float) -> str:
     """Convert a Plotly colour string (hex or rgb) to an rgba string."""
     c = str(color).strip()
@@ -238,6 +320,7 @@ def _rgba(color: str, alpha: float) -> str:
     return f"rgba(0,0,0,{a})"
 
 
+# Format raw values into display-ready KPI text.
 def _format_int_card_value(value: Optional[float]) -> str:
     """Format a numeric KPI value for display, or return 'N/A'."""
 
@@ -254,6 +337,7 @@ def _format_int_card_value(value: Optional[float]) -> str:
         return "N/A"
 
 
+# Format raw values into display-ready KPI text.
 def _format_ratio_card_value(value: Optional[float], *, decimals: int = 3) -> str:
     """Format a ratio KPI value for display, or return 'N/A'."""
 
@@ -277,6 +361,7 @@ def _format_ratio_card_value(value: Optional[float], *, decimals: int = 3) -> st
     return f"{x:.{d}f}"
 
 
+# Format raw values into display-ready KPI text.
 def _format_percent_card_value(value: Optional[float], *, decimals: int = 1) -> str:
     """Format a proportion (0..1) as a percentage for KPI display, or 'N/A'."""
 
@@ -300,6 +385,7 @@ def _format_percent_card_value(value: Optional[float], *, decimals: int = 1) -> 
     return f"{x * 100:.{d}f}%"
 
 
+# Format raw values into display-ready KPI text.
 def _format_signed_int_card_value(value: Optional[float]) -> str:
     """Format a signed integer KPI value for display, or return 'N/A'."""
 
@@ -325,6 +411,7 @@ def _format_signed_int_card_value(value: Optional[float]) -> str:
     return f"{n:,}"
 
 
+# Compute a derived KPI from the current filtered dataset.
 def _compute_net_caseload_flow_latest(df: pd.DataFrame) -> Optional[float]:
     """Compute latest-month net flow = inflow - outflow.
 
@@ -389,6 +476,7 @@ def _compute_net_caseload_flow_latest(df: pd.DataFrame) -> Optional[float]:
     return float(inflow) - float(outflow)
 
 
+# Compute a derived KPI from the current filtered dataset.
 def _compute_caseload_throughput_rate_latest(df: pd.DataFrame) -> Optional[float]:
     """Compute latest-month caseload throughput rate = outflow / caseload.
 
@@ -453,6 +541,76 @@ def _compute_caseload_throughput_rate_latest(df: pd.DataFrame) -> Optional[float
     return float(outflow) / float(caseload)
 
 
+# Compute a derived KPI from the current filtered dataset.
+def _compute_clearance_time_weeks_latest(
+    df: pd.DataFrame,
+    *,
+    weeks_in_month: float = 4.3,
+    waiters_col: str = "waiters",
+    first_contacts_col: str = "clock_stop_actuals",
+) -> Optional[float]:
+    """Compute the latest-month waiting list clearance time in weeks.
+
+    Purpose:
+        Estimate how many weeks it would take to clear the current waiting list
+        at the current (latest-month) rate of first contacts.
+
+    Formula:
+        clearance_weeks = Waiters / (LatestMonthFirstContacts / 4.3)
+    """
+
+    if df is None or df.empty:
+        return None
+
+    base = df.copy()
+    if "period_end" not in base.columns:
+        return None
+
+    if waiters_col not in base.columns or first_contacts_col not in base.columns:
+        return None
+
+    try:
+        wim = float(weeks_in_month)
+    except Exception:
+        wim = 4.3
+    if not np.isfinite(wim) or wim <= 0:
+        return None
+
+    base["period_end"] = pd.to_datetime(base["period_end"], errors="coerce")
+    base = base.dropna(subset=["period_end"])
+    if base.empty:
+        return None
+
+    base["period_end"] = base["period_end"].dt.to_period("M").dt.to_timestamp("M")
+    latest_period_end = base["period_end"].max()
+    if pd.isna(latest_period_end):
+        return None
+
+    latest = base[base["period_end"] == latest_period_end].copy()
+    if latest.empty:
+        return None
+
+    waiters = pd.to_numeric(latest[waiters_col], errors="coerce").sum(skipna=True)
+    first_contacts = pd.to_numeric(latest[first_contacts_col], errors="coerce").sum(
+        skipna=True
+    )
+
+    if not np.isfinite(waiters) or float(waiters) < 0:
+        return None
+    if not np.isfinite(first_contacts) or float(first_contacts) <= 0:
+        return None
+
+    weekly_contact_rate = float(first_contacts) / float(wim)
+    if not np.isfinite(weekly_contact_rate) or weekly_contact_rate <= 0:
+        return None
+
+    clearance_weeks = float(waiters) / float(weekly_contact_rate)
+    if not np.isfinite(clearance_weeks) or clearance_weeks < 0:
+        return None
+    return clearance_weeks
+
+
+# Compute a derived KPI from the current filtered dataset.
 def _compute_demand_ratio_latest(
     df: pd.DataFrame,
     *,
@@ -530,6 +688,8 @@ def _compute_demand_ratio_latest(
     if by_service.empty:
         return None
 
+    # Aggregate at trust-filter level: ratio of totals (not mean of service ratios)
+    # so larger services are weighted by their target volumes.
     numer = (
         pd.to_numeric(by_service["clock_stop_actuals"], errors="coerce").fillna(0)
         + pd.to_numeric(by_service["discharges_no_clock_stop"], errors="coerce").fillna(
@@ -547,6 +707,7 @@ def _compute_demand_ratio_latest(
     return out
 
 
+# Compute a derived KPI from the current filtered dataset.
 def _compute_sustainable_caseload_latest(
     df: pd.DataFrame,
     *,
@@ -655,6 +816,8 @@ def _compute_sustainable_caseload_latest(
     if not np.isfinite(numer) or not np.isfinite(denom) or float(denom) <= 0:
         return None
 
+    # Invert the latest demand ratio to estimate caseload level at DR=1.0:
+    # sustainable_caseload = current_caseload / demand_ratio_latest.
     demand_ratio_latest = float(numer) / float(denom)
     if not np.isfinite(demand_ratio_latest) or demand_ratio_latest <= 0:
         return None
@@ -665,6 +828,7 @@ def _compute_sustainable_caseload_latest(
     return float(latest_caseload) / float(demand_ratio_latest)
 
 
+# Build and return a dashboard layout section or component.
 def create_filter_section():
     """Create the top-of-page filter controls.
 
@@ -734,115 +898,121 @@ def create_filter_section():
         {"label": f"{p}%", "value": p} for p in range(50, 101, 5)
     ]
 
-    return dbc.Row(
-        [
-            dbc.Col(
-                [
-                    dbc.Row(
-                        [
-                            dbc.Col(
-                                html.Label("Date Range:", className="fw-bold"),
-                                width="auto",
-                            ),
-                            dbc.Col(
-                                html.Div(
-                                    [
-                                        dcc.Store(
-                                            id="date-slider-dates",
-                                            data=slider_dates,
-                                        ),
-                                        html.Div(
-                                            id="date-range-slider-label",
-                                            className="text-muted small mb-1",
-                                        ),
-                                        dcc.RangeSlider(
-                                            id="date-range-slider",
-                                            min=0,
-                                            max=max(0, len(slider_dates) - 1),
-                                            step=1,
-                                            value=[default_start_idx, default_end_idx],
-                                            marks=marks,
-                                            allowCross=False,
-                                            tooltip={
-                                                "placement": "bottom",
-                                                "always_visible": False,
-                                            },
-                                        ),
-                                    ]
+    return html.Div(
+        dbc.Row(
+            [
+                dbc.Col(
+                    [
+                        dbc.Row(
+                            [
+                                dbc.Col(
+                                    html.Label("Date Range:", className="fw-bold"),
+                                    width="auto",
                                 ),
-                                width=True,
-                            ),
-                        ],
-                        className="align-items-center g-2",
-                    )
-                ],
-                width=4,
-            ),
-            dbc.Col(
-                [
-                    dbc.Row(
-                        [
-                            dbc.Col(
-                                html.Label("Service:", className="fw-bold"),
-                                width="auto",
-                            ),
-                            dbc.Col(
-                                dcc.Dropdown(
-                                    id="service-line-dropdown",
-                                    options=service_line_options,
-                                    multi=True,
-                                    placeholder="Select service(s) (all if none selected)",
+                                dbc.Col(
+                                    html.Div(
+                                        [
+                                            dcc.Store(
+                                                id="date-slider-dates",
+                                                data=slider_dates,
+                                            ),
+                                            html.Div(
+                                                id="date-range-slider-label",
+                                                className="text-muted small mb-1",
+                                            ),
+                                            dcc.RangeSlider(
+                                                id="date-range-slider",
+                                                min=0,
+                                                max=max(0, len(slider_dates) - 1),
+                                                step=1,
+                                                value=[
+                                                    default_start_idx,
+                                                    default_end_idx,
+                                                ],
+                                                marks=marks,
+                                                allowCross=False,
+                                                tooltip={
+                                                    "placement": "bottom",
+                                                    "always_visible": False,
+                                                },
+                                            ),
+                                        ]
+                                    ),
+                                    width=True,
                                 ),
-                                width=True,
-                            ),
-                        ],
-                        className="align-items-center g-2",
-                    )
-                ],
-                width=4,
-            ),
-            dbc.Col(
-                [
-                    dbc.Row(
-                        [
-                            dbc.Col(
-                                html.Label(
-                                    "Demand Percentile:",
-                                    className="fw-bold",
+                            ],
+                            className="align-items-center g-2",
+                        )
+                    ],
+                    width=4,
+                ),
+                dbc.Col(
+                    [
+                        dbc.Row(
+                            [
+                                dbc.Col(
+                                    html.Label("Service:", className="fw-bold"),
+                                    width="auto",
                                 ),
-                                width="auto",
-                            ),
-                            dbc.Col(
-                                dcc.Dropdown(
-                                    id="demand-percentile-dropdown",
-                                    options=demand_percentile_options,
-                                    value=60,
-                                    clearable=False,
+                                dbc.Col(
+                                    dcc.Dropdown(
+                                        id="service-line-dropdown",
+                                        options=service_line_options,
+                                        multi=True,
+                                        placeholder="Select service(s) (all if none selected)",
+                                    ),
+                                    width=True,
                                 ),
-                                width=True,
-                            ),
-                        ],
-                        className="align-items-center g-2",
-                    )
-                ],
-                width=2,
-            ),
-            dbc.Col(
-                [
-                    dbc.Button(
-                        "Apply Filters",
-                        id="apply-filters-btn",
-                        color="primary",
-                        className="w-100",
-                    ),
-                ],
-                width=2,
-            ),
-        ],
-        className="mb-4 justify-content-center",
+                            ],
+                            className="align-items-center g-2",
+                        )
+                    ],
+                    width=4,
+                ),
+                dbc.Col(
+                    [
+                        dbc.Row(
+                            [
+                                dbc.Col(
+                                    html.Label(
+                                        "Clinician Patient Facing Time:",
+                                        className="fw-bold",
+                                    ),
+                                    width="auto",
+                                ),
+                                dbc.Col(
+                                    dcc.Dropdown(
+                                        id="demand-percentile-dropdown",
+                                        options=demand_percentile_options,
+                                        value=60,
+                                        clearable=False,
+                                    ),
+                                    width=True,
+                                ),
+                            ],
+                            className="align-items-center g-2",
+                        )
+                    ],
+                    width=2,
+                ),
+                dbc.Col(
+                    [
+                        dbc.Button(
+                            "Apply Filters",
+                            id="apply-filters-btn",
+                            className="nhs-btn-primary w-100",
+                        ),
+                    ],
+                    width=2,
+                ),
+            ],
+            className="justify-content-center",
+        ),
+        className="nhs-filter-bar mb-4",
     )
 
 
+# Build a monthly-indexed time series for charting and forecasts.
 def _monthly_series_from_filtered_df(df: pd.DataFrame, metric: str) -> pd.Series:
     """Build a month-end indexed series for a single metric from the filtered dataset."""
     if df is None or df.empty:
@@ -872,6 +1042,7 @@ def _monthly_series_from_filtered_df(df: pd.DataFrame, metric: str) -> pd.Series
     return y
 
 
+# Build a metric-specific chart, optionally with forecast overlay.
 def _metric_timeseries_figure(
     *,
     df: pd.DataFrame,
@@ -887,7 +1058,6 @@ def _metric_timeseries_figure(
 
     if y.empty:
         fig.update_layout(
-            title=dict(text=label, x=0.5, xanchor="center"),
             template="plotly_white",
             height=420,
             paper_bgcolor="rgba(0,0,0,0)",
@@ -924,9 +1094,6 @@ def _metric_timeseries_figure(
             if len(y) >= 12 and y.nunique() >= 2:
                 # Use the filtered series signature as a cache key so model
                 # selection runs only once per metric per filter state.
-                #
-                # Your dataset currently spans ~30 months, so we keep the search
-                # space intentionally small to stay responsive.
                 y_fit = y
                 if len(y_fit) > 36:
                     y_fit = y_fit.iloc[-36:]
@@ -940,8 +1107,6 @@ def _metric_timeseries_figure(
                 )
                 if spec is None:
                     y_len = int(len(y_fit))
-                    # Guardrails for short monthly series (~30 months): ETS with
-                    # additive seasonality is usually OK, but keep it optional.
                     seasonal_opts = ("add", None) if y_len >= 24 else (None,)
 
                     spec = small_grid_search_aic_ets(
@@ -1087,13 +1252,12 @@ def _metric_timeseries_figure(
             )
 
     fig.update_layout(
-        title=dict(text=label, x=0.5, xanchor="center", font=dict(size=20)),
         xaxis_title="Period",
         yaxis_title="Count",
         hovermode="x unified",
         height=420,
         template="plotly_white",
-        margin=dict(l=40, r=30, t=70, b=50),
+        margin=dict(l=40, r=30, t=20, b=50),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
     )
@@ -1116,6 +1280,7 @@ def _metric_timeseries_figure(
     return fig
 
 
+# Helper that prepares the Overview tab visual output.
 def _overview_key_metrics_figure(
     *,
     df: pd.DataFrame,
@@ -1162,7 +1327,7 @@ def _overview_key_metrics_figure(
 
     fig = go.Figure()
 
-    palette = px.colors.qualitative.Plotly
+    palette = NHS_CHART_COLOURS
     series = [
         ("Referrals", "referrals"),
         ("Waiters", "waiters"),
@@ -1402,12 +1567,6 @@ def _overview_key_metrics_figure(
             )
 
     fig.update_layout(
-        title=dict(
-            text="Key Metrics Over Time",
-            x=0.5,
-            xanchor="center",
-            font=dict(size=22),
-        ),
         xaxis_title="Period",
         yaxis_title="Count",
         hovermode="x unified",
@@ -1428,7 +1587,7 @@ def _overview_key_metrics_figure(
         legend_itemclick="toggle",
         legend_itemdoubleclick="toggleothers",
         legend_groupclick="togglegroup",
-        margin=dict(l=40, r=200, t=80, b=50),
+        margin=dict(l=40, r=200, t=20, b=50),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
     )
@@ -1454,60 +1613,97 @@ def _overview_key_metrics_figure(
 # ---------------------------------------------------------------------
 # Layout
 # ---------------------------------------------------------------------
-app.layout = dbc.Container(
+app.layout = html.Div(
     [
-        # Header
-        dbc.Row(
-            [
-                dbc.Col(
-                    [
-                        html.H1(
-                            "🏥 NHFT Demand & Capacity Platform",
-                            className="text-center my-4",
-                        ),
-                        html.Hr(),
-                    ]
-                )
-            ]
-        ),
-        # Filters Row
-        create_filter_section(),
-        # Summary Statistics Row
-        html.Div(id="summary-stats-row"),
-        # Main Content
-        dbc.Row(
-            [
-                dbc.Col(
-                    [
-                        # Tabs for different views
-                        dcc.Tabs(
-                            id="main-tabs",
-                            value="overview-tab",
-                            children=[
-                                dcc.Tab(label="📈 Overview", value="overview-tab"),
-                                dcc.Tab(label="👥 Demand Analysis", value="demand-tab"),
-                                dcc.Tab(
-                                    label="💼 Capacity Analysis", value="capacity-tab"
-                                ),
-                            ],
-                            className="mb-3",
-                        ),
-                        # Tab Content
-                        html.Div(id="tab-content"),
-                    ],
-                    width=12,
-                ),
-            ]
-        ),
-        # Store filtered data
-        dcc.Store(id="filtered-data-store"),
-        # Footer
+        # NHS Header Banner
         html.Div(
-            id="footer-content",
-            className="footer mt-5 pt-4 pb-3 border-top",
+            dbc.Container(
+                dbc.Row(
+                    [
+                        dbc.Col(
+                            html.H1("NHFT Demand & Capacity Platform"),
+                            width=True,
+                        ),
+                        dbc.Col(
+                            html.Div(
+                                [
+                                    html.Img(
+                                        src="/images/NHFT.svg",
+                                        className="nhs-logo-img",
+                                    ),
+                                    html.Img(
+                                        src="/images/NHS.jpg",
+                                        className="nhs-logo-overlay",
+                                    ),
+                                ],
+                                className="nhs-logo-wrapper",
+                            ),
+                            width="auto",
+                            className="d-flex align-items-center",
+                        ),
+                    ],
+                    className="align-items-center",
+                ),
+                fluid=True,
+            ),
+            className="nhs-header",
         ),
-    ],
-    fluid=True,
+        # Body
+        dbc.Container(
+            [
+                # Filters Row
+                html.Div(className="mt-4"),
+                create_filter_section(),
+                # Summary Statistics Row
+                html.Div(id="summary-stats-row"),
+                # Main Content
+                dbc.Row(
+                    [
+                        dbc.Col(
+                            [
+                                dcc.Tabs(
+                                    id="main-tabs",
+                                    value="overview-tab",
+                                    children=[
+                                        dcc.Tab(
+                                            label="ℹ️  About This Dashboard",
+                                            value="about-tab",
+                                        ),
+                                        dcc.Tab(
+                                            label="📈  Overview",
+                                            value="overview-tab",
+                                        ),
+                                        dcc.Tab(
+                                            label="👥  Demand Analysis",
+                                            value="demand-tab",
+                                        ),
+                                        dcc.Tab(
+                                            label="💼  Capacity Analysis",
+                                            value="capacity-tab",
+                                        ),
+                                    ],
+                                    className="nhs-tabs mb-3",
+                                ),
+                                html.Div(id="tab-content"),
+                            ],
+                            width=12,
+                        ),
+                    ]
+                ),
+                # Store filtered data
+                dcc.Store(id="filtered-data-store"),
+            ],
+            fluid=True,
+        ),
+        # NHS Footer
+        html.Div(
+            dbc.Container(
+                html.Div(id="footer-content"),
+                fluid=True,
+            ),
+            className="nhs-footer",
+        ),
+    ]
 )
 
 
@@ -1523,6 +1719,7 @@ app.layout = dbc.Container(
         State("service-line-dropdown", "value"),
     ],
 )
+# Internal helper for shared dashboard logic.
 def filter_data(n_clicks, slider_range, slider_dates, service_lines):
     """Filter patient data based on the UI controls.
 
@@ -1595,6 +1792,7 @@ def filter_data(n_clicks, slider_range, slider_dates, service_lines):
     [Input("date-range-slider", "value")],
     [State("date-slider-dates", "data")],
 )
+# Callback handler that updates UI output from current inputs.
 def update_date_slider_label(slider_range, slider_dates):
     if (
         not slider_dates
@@ -1621,6 +1819,7 @@ def update_date_slider_label(slider_range, slider_dates):
 @app.callback(
     Output("summary-stats-row", "children"), [Input("filtered-data-store", "data")]
 )
+# Callback handler that updates UI output from current inputs.
 def update_summary_stats(data_json):
     """Update the KPI cards row based on the filtered dataset.
 
@@ -1710,6 +1909,7 @@ def update_summary_stats(data_json):
 @app.callback(
     Output("footer-content", "children"), [Input("filtered-data-store", "data")]
 )
+# Callback handler that updates UI output from current inputs.
 def update_footer(data_json):
     """Update footer text, including the latest reporting period end date.
 
@@ -1731,11 +1931,11 @@ def update_footer(data_json):
 
     return html.P(
         [
-            "© 2025 Northamptonshire Healthcare NHS Foundation Trust | ",
-            "BI Development Team | ",
+            "© 2025 Northamptonshire Healthcare NHS Foundation Trust  |  ",
+            "BI Development Team  |  ",
             html.Strong(f"Latest Reporting Period End: {latest_period_end}"),
         ],
-        className="text-center text-muted mb-0",
+        className="text-center mb-0",
     )
 
 
@@ -1747,17 +1947,22 @@ def update_footer(data_json):
         Input("demand-percentile-dropdown", "value"),
     ],
 )
+# Callback handler that updates UI output from current inputs.
 def update_tab_content(active_tab, data_json, demand_percentile):
     """Render the selected tab content.
 
     Args:
-        active_tab: Selected tab ID ("overview-tab", "demand-tab", "capacity-tab").
+        active_tab: Selected tab ID ("about-tab", "overview-tab", "demand-tab", "capacity-tab").
         data_json: JSON-encoded DataFrame (orient="split") from dcc.Store.
 
     Returns:
         A Dash component containing the tab content (charts/tables), or an alert
         div if data is missing/empty.
     """
+    # Keep the About tab accessible even before filters are applied.
+    if active_tab == "about-tab":
+        return create_about_tab()
+
     if data_json is None:
         return html.Div(
             "No data available. Click 'Apply Filters' to load data.",
@@ -1781,6 +1986,7 @@ def update_tab_content(active_tab, data_json, demand_percentile):
     return html.Div("Invalid tab selection")
 
 
+# Build and return a dashboard layout section or component.
 def create_overview_tab(df, *, demand_percentile: Optional[int | float] = 60):
     """Create the Overview tab layout.
 
@@ -1834,7 +2040,7 @@ def create_overview_tab(df, *, demand_percentile: Optional[int | float] = 60):
                 className="p-2",
             ),
         ],
-        className="mb-4 shadow-sm",
+        className="nhs-card mb-4",
     )
 
     # -----------------------------
@@ -1863,7 +2069,7 @@ def create_overview_tab(df, *, demand_percentile: Optional[int | float] = 60):
                             className="p-2",
                         ),
                     ],
-                    className="mb-4 shadow-sm",
+                    className="nhs-card mb-4",
                 )
 
     # -----------------------------
@@ -1883,7 +2089,7 @@ def create_overview_tab(df, *, demand_percentile: Optional[int | float] = 60):
                 className="p-2",
             ),
         ],
-        className="mb-4 shadow-sm",
+        className="nhs-card mb-4",
     )
 
     sustainable_caseload = _compute_sustainable_caseload_latest(
@@ -1896,43 +2102,53 @@ def create_overview_tab(df, *, demand_percentile: Optional[int | float] = 60):
     )
     net_flow_latest = _compute_net_caseload_flow_latest(df_sorted)
     throughput_rate_latest = _compute_caseload_throughput_rate_latest(df_sorted)
+    clearance_weeks_latest = _compute_clearance_time_weeks_latest(df_sorted)
     sustainable_card_row = dbc.Row(
         [
             dbc.Col(
                 create_metric_card(
-                    "Sustainable Caseload (DR=1.0)",
+                    "Demand Ratio",
+                    _format_percent_card_value(demand_ratio_latest, decimals=1),
+                    "⚖️",
+                    "primary",
+                    description="Total throughput vs target. 100% and above means demand was met last month",
+                ),
+            ),
+            dbc.Col(
+                create_metric_card(
+                    "Sustainable Caseload",
                     _format_int_card_value(sustainable_caseload),
                     "🌿",
                     "success",
+                    description="Estimated caseload size sustainable at current throughput (based on Demand Ratio)",
                 ),
-                width=3,
             ),
             dbc.Col(
                 create_metric_card(
-                    "Demand Ratio (Latest)",
-                    _format_ratio_card_value(demand_ratio_latest, decimals=3),
-                    "⚖️",
-                    "primary",
-                ),
-                width=3,
-            ),
-            dbc.Col(
-                create_metric_card(
-                    "Net Caseload Flow (Latest)",
+                    "Net Caseload Flow",
                     _format_signed_int_card_value(net_flow_latest),
                     "🔄",
                     "warning",
+                    description="Balance of patients entering vs leaving caseload (First Contacts vs Discharges)",
                 ),
-                width=3,
             ),
             dbc.Col(
                 create_metric_card(
-                    "Caseload Throughput (Latest)",
+                    "Caseload Throughput",
                     _format_percent_card_value(throughput_rate_latest, decimals=1),
                     "♻️",
                     "info",
+                    description="Percentage of patients discharged from caseload last month",
                 ),
-                width=3,
+            ),
+            dbc.Col(
+                create_metric_card(
+                    "Clearance Time (Weeks)",
+                    _format_ratio_card_value(clearance_weeks_latest, decimals=1),
+                    "🧹",
+                    "secondary",
+                    description="Assuming referrals are closed, weeks to clear waiting list at last month's first contact rate",
+                ),
             ),
         ],
         className="mb-4 justify-content-center",
@@ -1947,16 +2163,16 @@ def create_overview_tab(df, *, demand_percentile: Optional[int | float] = 60):
                 [
                     html.H4("📈 Overview", className="alert-heading"),
                     html.P(
-                        "Use the filters above to change the view. In charts, you can click legend items to show/hide metrics. "
-                        "Forecast toggles apply per chart (Overview and Demand Analysis)."
+                        "This tab provides a high-level summary of service demand and capacity. "
+                        "The KPI cards show the latest month's key metrics, while the time series charts track trends over time. "
+                        "Use the filters above to focus on specific services or date ranges, and click legend items to show/hide individual metrics."
                     ),
                     html.P(
-                        "Forecasting note: ETS / exponential smoothing (Holt-Winters) works best with enough history to learn seasonality. "
-                        "For monthly data, adjust the date selector to 2-3 years (~24-36 points) when forecasting."
+                        "Forecast toggles on each chart use ETS (Holt-Winters Exponential Smoothing) to project future values with a 95% confidence interval. "
+                        "For best results, include at least 2 years of data when using forecasts."
                     ),
                 ],
-                color="info",
-                className="mt-4",
+                className="nhs-info-box mt-4",
             ),
             dcc.Store(
                 id="overview-keymetrics-visible-metrics",
@@ -1970,6 +2186,7 @@ def create_overview_tab(df, *, demand_percentile: Optional[int | float] = 60):
     )
 
 
+# Internal helper for shared dashboard logic.
 def _waiters_18wk_breakdown_figure(
     df_sorted: pd.DataFrame,
     *,
@@ -1998,7 +2215,7 @@ def _waiters_18wk_breakdown_figure(
             x=x_dates,
             y=waiters_18wk["waiters_under_18_weeks"],
             name="Under 18 Weeks",
-            marker_color="#636EFA",
+            marker_color=NHS_BLUE,
             hovertemplate="%{fullData.name}: <b>%{y:,}</b><extra></extra>",
         )
     )
@@ -2007,7 +2224,7 @@ def _waiters_18wk_breakdown_figure(
             x=x_dates,
             y=waiters_18wk["waiters_over_18_weeks"],
             name="18+ Weeks",
-            marker_color="#EF553B",
+            marker_color=NHS_RED,
             hovertemplate="%{fullData.name}: <b>%{y:,}</b><extra></extra>",
         )
     )
@@ -2065,6 +2282,7 @@ def _waiters_18wk_breakdown_figure(
         Input("overview-keymetrics-visible-metrics", "data"),
     ],
 )
+# Callback handler that updates UI output from current inputs.
 def update_overview_keymetrics_timeseries(data_json, forecast_on, visible_metrics):
     if data_json is None:
         return go.Figure()
@@ -2087,6 +2305,7 @@ def update_overview_keymetrics_timeseries(data_json, forecast_on, visible_metric
     State("overview-keymetrics-visible-metrics", "data"),
     prevent_initial_call=True,
 )
+# Callback handler that updates UI output from current inputs.
 def update_overview_keymetrics_visible_metrics(restyle_data, fig, current_visible):
     """Maintain a list of legend-visible metric keys for the Overview chart.
 
@@ -2138,6 +2357,7 @@ def update_overview_keymetrics_visible_metrics(restyle_data, fig, current_visibl
     Output("referrals-timeseries", "figure"),
     [Input("filtered-data-store", "data"), Input("referrals-forecast-toggle", "value")],
 )
+# Callback handler that updates UI output from current inputs.
 def update_referrals_timeseries(data_json, forecast_on):
     if data_json is None:
         return go.Figure()
@@ -2149,7 +2369,7 @@ def update_referrals_timeseries(data_json, forecast_on):
         df=df,
         metric="referrals",
         label="Referrals",
-        color="#636EFA",
+        color=NHS_BLUE,
         forecast_on=bool(forecast_on),
         monthly_ticks=False,
     )
@@ -2159,6 +2379,7 @@ def update_referrals_timeseries(data_json, forecast_on):
     Output("waiters-timeseries", "figure"),
     [Input("filtered-data-store", "data"), Input("waiters-forecast-toggle", "value")],
 )
+# Callback handler that updates UI output from current inputs.
 def update_waiters_timeseries(data_json, forecast_on):
     if data_json is None:
         return go.Figure()
@@ -2170,7 +2391,7 @@ def update_waiters_timeseries(data_json, forecast_on):
         df=df,
         metric="waiters",
         label="Waiters",
-        color="#EF553B",
+        color=NHS_RED,
         forecast_on=bool(forecast_on),
         monthly_ticks=False,
     )
@@ -2180,6 +2401,7 @@ def update_waiters_timeseries(data_json, forecast_on):
     Output("caseload-timeseries", "figure"),
     [Input("filtered-data-store", "data"), Input("caseload-forecast-toggle", "value")],
 )
+# Callback handler that updates UI output from current inputs.
 def update_caseload_timeseries(data_json, forecast_on):
     if data_json is None:
         return go.Figure()
@@ -2191,7 +2413,7 @@ def update_caseload_timeseries(data_json, forecast_on):
         df=df,
         metric="caseload",
         label="Caseload",
-        color="#00CC96",
+        color=NHS_AQUA_GREEN,
         forecast_on=bool(forecast_on),
         monthly_ticks=False,
     )
@@ -2201,6 +2423,7 @@ def update_caseload_timeseries(data_json, forecast_on):
     Output("contacts-timeseries", "figure"),
     [Input("filtered-data-store", "data"), Input("contacts-forecast-toggle", "value")],
 )
+# Callback handler that updates UI output from current inputs.
 def update_contacts_timeseries(data_json, forecast_on):
     if data_json is None:
         return go.Figure()
@@ -2212,7 +2435,7 @@ def update_contacts_timeseries(data_json, forecast_on):
         df=df,
         metric="total_contacts",
         label="Contacts",
-        color="#AB63FA",
+        color=NHS_PURPLE,
         forecast_on=bool(forecast_on),
         monthly_ticks=False,
     )
@@ -2225,6 +2448,7 @@ def update_contacts_timeseries(data_json, forecast_on):
         Input("discharges-forecast-toggle", "value"),
     ],
 )
+# Callback handler that updates UI output from current inputs.
 def update_discharges_timeseries(data_json, forecast_on):
     if data_json is None:
         return go.Figure()
@@ -2236,12 +2460,13 @@ def update_discharges_timeseries(data_json, forecast_on):
         df=df,
         metric="discharges_with_clock_stop",
         label="Discharges",
-        color="#FFA15A",
+        color=NHS_ORANGE,
         forecast_on=bool(forecast_on),
         monthly_ticks=False,
     )
 
 
+# Build and return a dashboard layout section or component.
 def create_service_line_summary_table(df: pd.DataFrame):
     """Create the patient summary DataTable by provider code and service line.
 
@@ -2293,17 +2518,19 @@ def create_service_line_summary_table(df: pd.DataFrame):
             }
         ],
         style_header={
-            "backgroundColor": "rgb(230, 230, 230)",
+            "backgroundColor": NHS_BLUE,
+            "color": NHS_WHITE,
             "fontWeight": "bold",
             "whiteSpace": "normal",
             "height": "auto",
         },
         style_data_conditional=[
-            {"if": {"row_index": "odd"}, "backgroundColor": "rgb(248, 248, 248)"}
+            {"if": {"row_index": "odd"}, "backgroundColor": "#F7F9FA"}
         ],
     )
 
 
+# Internal helper for shared dashboard logic.
 def _build_demand_summary_table_frame(
     df: pd.DataFrame,
     *,
@@ -2384,8 +2611,8 @@ def _build_demand_summary_table_frame(
         else:
             summary_df["waiters_under_18_weeks"] = calc_under_18
 
-    # Clock Stop Target: percentile of historical monthly referrals for the service line.
-    # Target remains constant across periods within the table.
+    # Clock Stop Target is computed once per service_line from full filtered history,
+    # then repeated across monthly rows to provide a stable benchmark line.
     if {"service_line", "referrals", "period_end"}.issubset(base.columns):
         ref_base = base[["service_line", "period_end", "referrals"]].copy()
         ref_base["referrals"] = pd.to_numeric(ref_base["referrals"], errors="coerce")
@@ -2410,6 +2637,7 @@ def _build_demand_summary_table_frame(
         numer_n = pd.to_numeric(numer, errors="coerce")
         denom_n = pd.to_numeric(denom, errors="coerce")
         out = numer_n / denom_n
+        # Ratios are undefined when target/caseload is zero or missing.
         out = out.where(denom_n > 0)
         return out
 
@@ -2507,6 +2735,7 @@ def _build_demand_summary_table_frame(
         Input("demand-percentile-dropdown", "value"),
     ],
 )
+# Callback handler that updates UI output from current inputs.
 def update_patient_summary_table(data_json, demand_percentile):
     """Recalculate Demand Analysis table metrics when filters change."""
     if data_json is None:
@@ -2531,6 +2760,7 @@ def update_patient_summary_table(data_json, demand_percentile):
     return summary_df.to_dict("records"), columns
 
 
+# Build and return a dashboard layout section or component.
 def create_staffing_pivot_table(
     patient_df: pd.DataFrame,
     staffing_df: Optional[pd.DataFrame],
@@ -2654,17 +2884,19 @@ def create_staffing_pivot_table(
             }
         ],
         style_header={
-            "backgroundColor": "rgb(230, 230, 230)",
+            "backgroundColor": NHS_BLUE,
+            "color": NHS_WHITE,
             "fontWeight": "bold",
             "whiteSpace": "normal",
             "height": "auto",
         },
         style_data_conditional=[
-            {"if": {"row_index": "odd"}, "backgroundColor": "rgb(248, 248, 248)"}
+            {"if": {"row_index": "odd"}, "backgroundColor": "#F7F9FA"}
         ],
     )
 
 
+# Helper used by Capacity Analysis charts and tables.
 def _capacity_filter_staffing(
     patient_df: pd.DataFrame,
     staffing_df: Optional[pd.DataFrame],
@@ -2720,10 +2952,11 @@ def _capacity_filter_staffing(
     return staffing_filtered, None
 
 
+# Helper used by Capacity Analysis charts and tables.
 def _capacity_style_figure(fig: go.Figure) -> go.Figure:
     """Apply a consistent, dashboard-friendly Plotly style."""
     fig.update_layout(
-        margin=dict(l=40, r=40, t=60, b=40),
+        margin=dict(l=40, r=40, t=20, b=40),
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
         legend=dict(
@@ -2741,6 +2974,7 @@ def _capacity_style_figure(fig: go.Figure) -> go.Figure:
     return fig
 
 
+# Helper used by Capacity Analysis charts and tables.
 def _capacity_staff_mix_by_group_figure(staffing_filtered: pd.DataFrame) -> go.Figure:
     by_group = (
         staffing_filtered.groupby("staff_group", as_index=False)
@@ -2752,20 +2986,19 @@ def _capacity_staff_mix_by_group_figure(staffing_filtered: pd.DataFrame) -> go.F
         x="staff",
         y="staff_group",
         orientation="h",
-        title="Total Staff by Staff Group",
         labels={"staff": "Staff (count)", "staff_group": "Staff group"},
     )
     fig.update_traces(hovertemplate="%{y}<br>Staff: %{x:,}<extra></extra>")
     return _capacity_style_figure(fig)
 
 
+# Helper used by Capacity Analysis charts and tables.
 def _capacity_staff_by_service_line_figure(
     staffing_filtered: pd.DataFrame,
 ) -> go.Figure:
     if staffing_filtered is None or staffing_filtered.empty:
         fig = go.Figure()
         fig.update_layout(
-            title=dict(text="Total Staff by Service Line", x=0.5, xanchor="center"),
             template="plotly_white",
             height=420,
             paper_bgcolor="rgba(0,0,0,0)",
@@ -2776,7 +3009,6 @@ def _capacity_staff_by_service_line_figure(
     if "service_line" not in staffing_filtered.columns:
         fig = go.Figure()
         fig.update_layout(
-            title=dict(text="Total Staff by Service Line", x=0.5, xanchor="center"),
             template="plotly_white",
             height=420,
             paper_bgcolor="rgba(0,0,0,0)",
@@ -2791,22 +3023,23 @@ def _capacity_staff_by_service_line_figure(
     )
 
     n_lines = int(by_service_line.shape[0])
-    fig_height = max(450, min(2400, 26 * n_lines + 200))
+    fig_height = max(460, 28 * n_lines + 120)
 
     fig = px.bar(
         by_service_line,
         x="staff",
         y="service_line",
         orientation="h",
-        title="Total Staff by Service Line",
-        labels={"staff": "Staff (count)", "service_line": "Service line"},
+        labels={"staff": "Staff (count)", "service_line": "Service Line"},
         height=fig_height,
     )
     fig.update_traces(hovertemplate="%{y}<br>Staff: %{x:,}<extra></extra>")
     fig.update_xaxes(showgrid=False)
+    fig.update_yaxes(showgrid=False)
     return _capacity_style_figure(fig)
 
 
+# Helper used by Capacity Analysis charts and tables.
 def _capacity_staff_vs_caseload_latest_figure(
     patient_df: pd.DataFrame,
     staffing_filtered: pd.DataFrame,
@@ -2843,6 +3076,8 @@ def _capacity_staff_vs_caseload_latest_figure(
         ["provider_code_current", "service_line"], as_index=False
     ).agg(staff=("staff", "sum"))
 
+    # Inner join keeps only provider/service pairs present in both patient
+    # demand and staffing snapshots for like-for-like comparison.
     merged = demand_latest.merge(
         staff_totals,
         on=["provider_code_current", "service_line"],
@@ -2885,7 +3120,6 @@ def _capacity_staff_vs_caseload_latest_figure(
             "staff_per_100_caseload": ":.2f",
             "service_label": False,
         },
-        title=f"Staff vs Caseload (Latest period: {latest_period_end.strftime('%b %Y')})",
         labels={
             "caseload": "Caseload (latest)",
             "staff": "Staff (total)",
@@ -2900,6 +3134,162 @@ def _capacity_staff_vs_caseload_latest_figure(
     return _capacity_style_figure(fig)
 
 
+# Note: Helper that builds a net caseload flow trend line chart over time.
+def _demand_net_flow_trend_figure(df: pd.DataFrame) -> go.Figure:
+    """Line chart showing monthly net caseload flow (referrals minus discharges) by service over time."""
+
+    summary_df = _build_demand_summary_table_frame(df, demand_percentile=60)
+    fig = go.Figure()
+
+    required_cols = {"service_line", "referrals", "period_end"}
+    if summary_df.empty or not required_cols.issubset(set(summary_df.columns)):
+        fig.add_annotation(
+            x=0.5,
+            y=0.5,
+            xref="paper",
+            yref="paper",
+            text="Not enough data to compute net caseload flow trend",
+            showarrow=False,
+        )
+        fig.update_layout(template="plotly_white", height=420)
+        return fig
+
+    summary_df = summary_df.copy()
+    summary_df["period_end"] = pd.to_datetime(summary_df["period_end"], errors="coerce")
+    summary_df["referrals"] = pd.to_numeric(summary_df["referrals"], errors="coerce")
+
+    # Calculate total outflow (discharges)
+    if "discharges_no_clock_stop" in summary_df.columns:
+        discharges_no = pd.to_numeric(
+            summary_df["discharges_no_clock_stop"], errors="coerce"
+        ).fillna(0)
+    else:
+        discharges_no = pd.Series(0, index=summary_df.index, dtype=float)
+
+    if "discharges_with_clock_stop" in summary_df.columns:
+        discharges_with = pd.to_numeric(
+            summary_df["discharges_with_clock_stop"], errors="coerce"
+        ).fillna(0)
+    elif "clock_stop_actuals" in summary_df.columns:
+        discharges_with = pd.to_numeric(
+            summary_df["clock_stop_actuals"], errors="coerce"
+        ).fillna(0)
+    else:
+        discharges_with = pd.Series(0, index=summary_df.index, dtype=float)
+
+    summary_df["outflow"] = discharges_with + discharges_no
+    summary_df["net_flow"] = summary_df["referrals"] - summary_df["outflow"]
+
+    if {"provider_code_current", "service_line"}.issubset(summary_df.columns):
+        summary_df["service_label"] = (
+            summary_df["provider_code_current"].astype(str)
+            + " - "
+            + summary_df["service_line"].astype(str)
+        )
+    else:
+        summary_df["service_label"] = summary_df["service_line"].astype(str)
+
+    summary_df = summary_df.dropna(subset=["period_end", "net_flow"])
+    summary_df = summary_df.sort_values("period_end")
+
+    if summary_df.empty:
+        fig.add_annotation(
+            x=0.5,
+            y=0.5,
+            xref="paper",
+            yref="paper",
+            text="No valid net flow data for selected filters",
+            showarrow=False,
+        )
+        fig.update_layout(template="plotly_white", height=420)
+        return fig
+
+    services = summary_df["service_label"].unique()
+    for svc in services:
+        svc_df = summary_df[summary_df["service_label"] == svc]
+        fig.add_trace(
+            go.Scatter(
+                x=svc_df["period_end"],
+                y=svc_df["net_flow"],
+                mode="lines+markers",
+                line=dict(shape="spline", smoothing=1.0),
+                name=svc,
+                hovertemplate="%{x|%b %Y}<br>Net Flow: %{y:,.0f}<extra>%{fullData.name}</extra>",
+            )
+        )
+
+    fig.add_hline(y=0, line_dash="dash", line_color="#444")
+    fig.update_layout(
+        xaxis_title="Month",
+        yaxis_title="Net Caseload Flow",
+        template="plotly_white",
+        height=460,
+        margin=dict(l=40, r=30, t=20, b=50),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        showlegend=True,
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1,
+            itemclick=False,
+            itemdoubleclick=False,
+        ),
+    )
+    fig.update_xaxes(showgrid=False)
+    fig.update_yaxes(tickformat=",", showgrid=True, gridcolor="rgba(0,0,0,0.08)")
+    return fig
+
+
+# Note: Compute a derived KPI from the current filtered dataset.
+def _compute_discharge_quality_latest(
+    df: pd.DataFrame,
+) -> tuple[Optional[float], Optional[float], Optional[float]]:
+    """Return latest-month weighted averages for discharge quality metrics.
+
+    Returns:
+        (avg_treatment_days, avg_contacts, avg_ftf_contacts) — any may be None.
+    """
+    if df is None or df.empty:
+        return None, None, None
+
+    base = df.copy()
+    if "period_end" not in base.columns:
+        return None, None, None
+
+    base["period_end"] = pd.to_datetime(base["period_end"], errors="coerce")
+    base = base.dropna(subset=["period_end"])
+    if base.empty:
+        return None, None, None
+
+    base["period_end"] = base["period_end"].dt.to_period("M").dt.to_timestamp("M")
+    latest_period = base["period_end"].max()
+    if pd.isna(latest_period):
+        return None, None, None
+
+    latest = base[base["period_end"] == latest_period]
+    if latest.empty:
+        return None, None, None
+
+    def _mean_or_none(col: str) -> Optional[float]:
+        if col not in latest.columns:
+            return None
+        s = pd.to_numeric(latest[col], errors="coerce").dropna()
+        if s.empty:
+            return None
+        v = float(s.mean())
+        return v if np.isfinite(v) else None
+
+    return (
+        _mean_or_none("average_length_of_treatment"),
+        _mean_or_none("average_contacts_at_discharge"),
+        _mean_or_none("average_ftf_contacts_at_discharge"),
+    )
+
+
+# Build and return a dashboard layout section or component.
 def create_demand_tab(df, *, demand_percentile: Optional[int | float] = 60):
     """Create the Demand tab layout.
 
@@ -2931,10 +3321,74 @@ def create_demand_tab(df, *, demand_percentile: Optional[int | float] = 60):
                 className="p-2",
             ),
         ],
-        className="mb-4 shadow-sm",
+        className="nhs-card mb-4",
     )
 
     summary_table = create_service_line_summary_table(df)
+    net_flow_trend_fig = _demand_net_flow_trend_figure(df_sorted)
+    avg_treatment_days, avg_contacts, avg_ftf_contacts = (
+        _compute_discharge_quality_latest(df_sorted)
+    )
+
+    net_flow_trend_card = dbc.Card(
+        [
+            dbc.CardHeader(
+                html.H5(
+                    "Net Caseload Flow Over Time",
+                    className="mb-0",
+                )
+            ),
+            dbc.CardBody(
+                dcc.Graph(
+                    id="demand-net-flow-trend",
+                    figure=net_flow_trend_fig,
+                ),
+                className="p-2",
+            ),
+        ],
+        className="nhs-card mb-4",
+    )
+
+    discharge_quality_cards = html.Div(
+        [
+            html.H5(
+                "Discharge Quality (Latest Month)",
+                className="mb-3 text-center",
+            ),
+            dbc.Row(
+                [
+                    dbc.Col(
+                        create_metric_card(
+                            "Avg Treatment Length",
+                            _format_ratio_card_value(avg_treatment_days, decimals=0),
+                            "⏱️",
+                            "primary",
+                            description="Average days from referral start to first contact for discharged patients",
+                        ),
+                    ),
+                    dbc.Col(
+                        create_metric_card(
+                            "Avg Contacts at Discharge",
+                            _format_ratio_card_value(avg_contacts, decimals=1),
+                            "📋",
+                            "info",
+                            description="Average total contacts per patient at point of discharge",
+                        ),
+                    ),
+                    dbc.Col(
+                        create_metric_card(
+                            "Avg FTF Contacts at Discharge",
+                            _format_ratio_card_value(avg_ftf_contacts, decimals=1),
+                            "🤝",
+                            "success",
+                            description="Average face-to-face contacts per patient at point of discharge",
+                        ),
+                    ),
+                ],
+                className="g-3",
+            ),
+        ],
+    )
 
     def metric_card(title: str, graph_id: str, toggle_id: str):
         return dbc.Card(
@@ -2960,7 +3414,7 @@ def create_demand_tab(df, *, demand_percentile: Optional[int | float] = 60):
                     className="p-2",
                 ),
             ],
-            className="mb-4 shadow-sm",
+            className="nhs-card mb-4",
         )
 
     sustainable_caseload = _compute_sustainable_caseload_latest(
@@ -2973,43 +3427,53 @@ def create_demand_tab(df, *, demand_percentile: Optional[int | float] = 60):
     )
     net_flow_latest = _compute_net_caseload_flow_latest(df_sorted)
     throughput_rate_latest = _compute_caseload_throughput_rate_latest(df_sorted)
+    clearance_weeks_latest = _compute_clearance_time_weeks_latest(df_sorted)
     sustainable_card_row = dbc.Row(
         [
             dbc.Col(
                 create_metric_card(
-                    "Sustainable Caseload (DR=1.0)",
+                    "Demand Ratio",
+                    _format_percent_card_value(demand_ratio_latest, decimals=1),
+                    "⚖️",
+                    "primary",
+                    description="Total throughput vs target. 100% and above means demand was met last month",
+                ),
+            ),
+            dbc.Col(
+                create_metric_card(
+                    "Sustainable Caseload",
                     _format_int_card_value(sustainable_caseload),
                     "🌿",
                     "success",
+                    description="Estimated caseload size sustainable at current throughput (based on Demand Ratio)",
                 ),
-                width=3,
             ),
             dbc.Col(
                 create_metric_card(
-                    "Demand Ratio (Latest)",
-                    _format_ratio_card_value(demand_ratio_latest, decimals=3),
-                    "⚖️",
-                    "primary",
-                ),
-                width=3,
-            ),
-            dbc.Col(
-                create_metric_card(
-                    "Net Caseload Flow (Latest)",
+                    "Net Caseload Flow",
                     _format_signed_int_card_value(net_flow_latest),
                     "🔄",
                     "warning",
+                    description="Balance of patients entering vs leaving caseload (First Contacts vs Discharges)",
                 ),
-                width=3,
             ),
             dbc.Col(
                 create_metric_card(
-                    "Caseload Throughput Rate (Latest)",
+                    "Caseload Throughput",
                     _format_percent_card_value(throughput_rate_latest, decimals=1),
                     "♻️",
                     "info",
+                    description="Percentage of patients discharged from caseload last month",
                 ),
-                width=3,
+            ),
+            dbc.Col(
+                create_metric_card(
+                    "Clearance Time (Weeks)",
+                    _format_ratio_card_value(clearance_weeks_latest, decimals=1),
+                    "🧹",
+                    "secondary",
+                    description="Assuming referrals are closed, weeks to clear waiting list at last month's first contact rate",
+                ),
             ),
         ],
         className="mb-4 justify-content-center",
@@ -3021,15 +3485,16 @@ def create_demand_tab(df, *, demand_percentile: Optional[int | float] = 60):
                 [
                     html.H4("👥 Demand Analysis", className="alert-heading"),
                     html.P(
-                        "Use the filters above to change the view. Each chart has its own forecast toggle (ETS with 95% CI)."
+                        "This tab breaks down patient demand in detail. It tracks referrals, waiting lists, caseload, contacts, and discharges "
+                        "over time, alongside a summary table showing service-level performance against targets. "
+                        "The Clinician Patient Facing Time filter sets the target threshold used in the demand summary table."
                     ),
                     html.P(
-                        "Forecasting note: ETS / exponential smoothing (Holt-Winters) works best with enough history to learn seasonality. "
-                        "For monthly data, adjust the date selector to 2-3 years (~24-36 points) when forecasting."
+                        "Each chart includes a forecast toggle using ETS (Holt-Winters Exponential Smoothing) with a 95% confidence interval. "
+                        "For best results, include at least 2 years of data when using forecasts."
                     ),
                 ],
-                color="info",
-                className="mt-4",
+                className="nhs-info-box mt-4",
             ),
             sustainable_card_row,
             dbc.Row(
@@ -3081,9 +3546,19 @@ def create_demand_tab(df, *, demand_percentile: Optional[int | float] = 60):
                         width=6,
                     ),
                     dbc.Col(
-                        waiters_breakdown_card,
+                        discharge_quality_cards,
                         width=6,
                     ),
+                ]
+            ),
+            dbc.Row(
+                [
+                    dbc.Col(waiters_breakdown_card, width=12),
+                ]
+            ),
+            dbc.Row(
+                [
+                    dbc.Col(net_flow_trend_card, width=12),
                 ]
             ),
             dbc.Row(
@@ -3102,6 +3577,7 @@ def create_demand_tab(df, *, demand_percentile: Optional[int | float] = 60):
     )
 
 
+# Build and return a dashboard layout section or component.
 def create_capacity_tab(df):
     """Create the Capacity tab layout.
 
@@ -3134,7 +3610,7 @@ def create_capacity_tab(df):
                     dbc.CardHeader(html.H5(title, className="mb-0")),
                     dbc.CardBody(dcc.Graph(id=graph_id, figure=fig), className="p-2"),
                 ],
-                className="mb-4 shadow-sm",
+                className="nhs-card mb-4",
             )
 
         capacity_graphs.append(
@@ -3168,14 +3644,14 @@ def create_capacity_tab(df):
                                             figure=fig_by_service_line,
                                         ),
                                         style={
-                                            "height": "560px",
+                                            "maxHeight": "560px",
                                             "overflowY": "auto",
                                         },
                                     ),
                                     className="p-2",
                                 ),
                             ],
-                            className="mb-4 shadow-sm",
+                            className="nhs-card mb-4",
                         ),
                         width=12,
                     ),
@@ -3205,13 +3681,17 @@ def create_capacity_tab(df):
                 [
                     html.H4("💼 Capacity Analysis", className="alert-heading"),
                     html.P(
-                        "Capacity visuals are based on the currently selected provider(s). "
-                        "Use the filters above to change the view."
+                        "This tab shows workforce capacity for the selected services. "
+                        "It displays staffing levels broken down by staff group (e.g. qualified, unqualified, support) "
+                        "and service line, helping identify where workforce gaps may exist relative to demand."
+                    ),
+                    html.P(
+                        "Use the filters above to focus on specific providers or service lines. "
+                        "The staffing table at the bottom provides a detailed breakdown of staff numbers."
                     ),
                     staffing_error if staffing_error is not None else None,
                 ],
-                color="info",
-                className="mt-4",
+                className="nhs-info-box mt-4",
             ),
             *capacity_graphs,
             dbc.Row(
@@ -3230,6 +3710,249 @@ def create_capacity_tab(df):
     )
 
 
+# Build and return a dashboard layout section or component.
+def create_about_tab():
+    """Create the About This Dashboard tab with full methodology and guidance."""
+
+    return html.Div(
+        [
+            dbc.Alert(
+                [
+                    html.H4("ℹ️ About This Dashboard", className="alert-heading"),
+                    html.P(
+                        "This page explains what the dashboard does, how its metrics are calculated, "
+                        "and how to interpret the data across each tab."
+                    ),
+                ],
+                className="nhs-info-box mt-4",
+            ),
+            # --- Purpose ---
+            dbc.Card(
+                [
+                    dbc.CardHeader(html.H5("Purpose", className="mb-0")),
+                    dbc.CardBody(
+                        [
+                            html.P(
+                                "This dashboard provides a data-driven view of demand, activity, and capacity across "
+                                "NHFT's community and mental health services. It is designed to support operational managers, "
+                                "service leads, and the Business Intelligence Service in understanding service pressures, "
+                                "identifying trends, and making informed planning decisions."
+                            ),
+                            html.P(
+                                "The platform tracks the full patient pathway from referral through to discharge and "
+                                "provides standardised metrics across all active service lines. It brings together referral demand, "
+                                "waiting list position, contact activity, caseload size, and discharge throughput into a single "
+                                "platform, enabling services to be compared on a consistent basis."
+                            ),
+                        ]
+                    ),
+                ],
+                className="nhs-card mb-4",
+            ),
+            # --- How Demand Is Measured ---
+            dbc.Card(
+                [
+                    dbc.CardHeader(html.H5("How Demand Is Measured", className="mb-0")),
+                    dbc.CardBody(
+                        [
+                            html.P(
+                                "At the heart of the model is a demand benchmarking approach. Rather than relying on fixed "
+                                "capacity targets (which require workforce data that is not currently available at the required "
+                                "granularity), the model uses a configurable Clinician Patient Facing Time parameter to derive a "
+                                "Clock Stop Target for each service line."
+                            ),
+                            html.P(
+                                "This target represents the referral volume at a chosen percentile of each service's own history. "
+                                "For example, at the 60th percentile, the target is the monthly referral volume that 60% of "
+                                "historical months fall at or below."
+                            ),
+                            html.P(
+                                [
+                                    html.Strong("Demand Ratio"),
+                                    " is then calculated by comparing actual throughput (first contacts and non-clock-stop "
+                                    "discharges) against this target. A ratio of 100% or above indicates the service is keeping "
+                                    "pace with demand; below 100% suggests a growing gap.",
+                                ]
+                            ),
+                            html.P(
+                                [
+                                    html.Strong("Sustainable Caseload"),
+                                    " extends this framework by applying the Demand Ratio to the current caseload size, "
+                                    "estimating how many patients the service can realistically sustain at its current throughput.",
+                                ]
+                            ),
+                        ]
+                    ),
+                ],
+                className="nhs-card mb-4",
+            ),
+            # --- Key Operational Metrics ---
+            dbc.Card(
+                [
+                    dbc.CardHeader(
+                        html.H5("Key Operational Metrics", className="mb-0")
+                    ),
+                    dbc.CardBody(
+                        [
+                            html.H6(
+                                "Caseload Throughput Rate", className="fw-bold mt-2"
+                            ),
+                            html.P(
+                                "Measures the proportion of the caseload that is discharged each month. A higher rate indicates "
+                                "patients are flowing through the service more actively; a declining rate suggests patients are "
+                                "accumulating on the caseload without being discharged, which compounds capacity pressure over time."
+                            ),
+                            html.H6("Net Caseload Flow", className="fw-bold mt-3"),
+                            html.P(
+                                "Shows the monthly balance of patients entering the caseload (via first contacts) against those "
+                                "leaving (via all discharge types). A positive value means the caseload is growing; a negative "
+                                "value means it is shrinking. Persistent positive flow, combined with a low throughput rate, "
+                                "signals that the service is heading towards an unsustainably large caseload."
+                            ),
+                            html.H6("Clearance Time", className="fw-bold mt-3"),
+                            html.P(
+                                "Estimates the number of weeks it would take to clear the current waiting list if no new referrals "
+                                "were received, based on the latest month's rate of first contacts. A rising clearance time indicates "
+                                "the waiting list is growing faster than the service can process it. This metric is particularly "
+                                "useful for identifying services where capacity is insufficient to prevent waiting list deterioration."
+                            ),
+                        ]
+                    ),
+                ],
+                className="nhs-card mb-4",
+            ),
+            # --- Tabs in the Dashboard ---
+            dbc.Card(
+                [
+                    dbc.CardHeader(html.H5("Tabs in the Dashboard", className="mb-0")),
+                    dbc.CardBody(
+                        [
+                            html.H6("\U0001f4c8 Overview", className="fw-bold mt-2"),
+                            html.P(
+                                "Provides a high-level summary of service demand and capacity. KPI cards show the latest month's "
+                                "headline figures while time series charts track referrals, waiters, caseload, contacts, and "
+                                "discharges over time. A staff-vs-caseload scatter plot and a waiting list breakdown (under vs "
+                                "over 18 weeks) provide additional operational context."
+                            ),
+                            html.H6(
+                                "\U0001f465 Demand Analysis", className="fw-bold mt-3"
+                            ),
+                            html.P(
+                                "Breaks down patient demand in detail with individual time series for each metric, each with "
+                                "its own forecast toggle. A waiting list breakdown by time band is shown alongside a service-level "
+                                "summary table that includes the Clock Stop Target (driven by the Clinician Patient Facing Time "
+                                "filter), demand ratios, and contacts-per-caseload metrics where source data exists."
+                            ),
+                            html.H6(
+                                "\U0001f4bc Capacity Analysis", className="fw-bold mt-3"
+                            ),
+                            html.P(
+                                "Shows workforce capacity for the selected services, broken down by staff group and service line. "
+                                "Due to current data constraints (see Data Limitations below), this tab presents capacity as a "
+                                "reference view rather than a fully integrated demand-capacity model. It can be used to triangulate "
+                                "demand signals with available workforce context."
+                            ),
+                        ]
+                    ),
+                ],
+                className="nhs-card mb-4",
+            ),
+            # --- Forecasting ---
+            dbc.Card(
+                [
+                    dbc.CardHeader(html.H5("Forecasting", className="mb-0")),
+                    dbc.CardBody(
+                        [
+                            html.P(
+                                "Each chart includes an optional forecast toggle that generates a 6-month projection using "
+                                "Exponential Smoothing (ETS / Holt-Winters) with a 95% confidence interval. Forecasts are "
+                                "intended to support proactive planning rather than replace clinical judgement."
+                            ),
+                            html.P(
+                                "For best results, include at least 2\u20133 years of data (24\u201336 monthly data points) in the "
+                                "date filter so the model has enough history to learn seasonal patterns."
+                            ),
+                        ]
+                    ),
+                ],
+                className="nhs-card mb-4",
+            ),
+            # --- Data & Refresh ---
+            dbc.Card(
+                [
+                    dbc.CardHeader(html.H5("Data Sources & Refresh", className="mb-0")),
+                    dbc.CardBody(
+                        [
+                            html.P(
+                                "Data is sourced from the NHFT Data Warehouse. Following each refresh, the dashboard "
+                                "presents activity up to the last fully completed reporting month, in line with the Trust's "
+                                "standard monthly reporting cycle."
+                            ),
+                            html.H6("Service Line Mapping", className="fw-bold mt-3"),
+                            html.P(
+                                "Patient-level data is mapped to service lines via the configuration table "
+                                "[MIS_Config].[dbo].[tbl_org_current_RL9_Service_Line]. Only services flagged as Active and "
+                                "RTT Report Enabled are included. Provider codes 996 and 998 are excluded."
+                            ),
+                        ]
+                    ),
+                ],
+                className="nhs-card mb-4",
+            ),
+            # --- Data Limitations ---
+            dbc.Card(
+                [
+                    dbc.CardHeader(
+                        html.H5(
+                            "Data Limitations, Triangulation & Capacity Approach",
+                            className="mb-0",
+                        )
+                    ),
+                    dbc.CardBody(
+                        [
+                            html.P(
+                                "During development, two practical constraints were identified that materially shape "
+                                "the modelling approach:"
+                            ),
+                            html.Ul(
+                                [
+                                    html.Li(
+                                        [
+                                            html.Strong(
+                                                "No historical workforce time series: "
+                                            ),
+                                            "Due to extraction limitations, historical staffing data was not obtainable at the "
+                                            "required granularity. The staffing dataset is therefore a current snapshot only "
+                                            "(no month-by-month staffing history).",
+                                        ]
+                                    ),
+                                    html.Li(
+                                        [
+                                            html.Strong(
+                                                "Staff vs patient service line misalignment: "
+                                            ),
+                                            "Patient activity and workforce data do not naturally align by service line because "
+                                            "service definitions are represented differently across systems (e.g. service lines vs "
+                                            "cost centres / organisational hierarchies).",
+                                        ]
+                                    ),
+                                ]
+                            ),
+                            html.P(
+                                "As a result, the Capacity tab is implemented as a reference view (staff mix, staff by "
+                                "service line), providing contextual workforce information rather than a fully time-aligned "
+                                "capacity model. The project focuses on demand-based benchmarking using demand percentiles, "
+                                "with the staffing snapshot providing supplementary capacity signals."
+                            ),
+                        ]
+                    ),
+                ],
+                className="nhs-card mb-4",
+            ),
+        ]
+    )
+
+
 # ---------------------------------------------------------------------
 # Run Server
 # ---------------------------------------------------------------------
@@ -3237,6 +3960,13 @@ if __name__ == "__main__":
     logger.info("Starting NHFT Demand-Capacity Dashboard...")
     logger.info("Dashboard will be available at: http://127.0.0.1:8050/")
 
-    # Flask's debug reloader starts the app twice (parent + child). Disable it to
-    # prevent duplicate startup logs while keeping debug mode features.
-    app.run(debug=True, host="127.0.0.1", port=8050, use_reloader=False)
+    # Keep the debug reloader enabled so layout/code changes appear immediately
+    # after save during development.
+    try:
+        app.run(debug=True, host="127.0.0.1", port=8050, use_reloader=True)
+    except OSError as e:
+        logger.error("❌ Failed to start Dash server: %s", e)
+        logger.error(
+            "If you already have the dashboard running, stop it (Ctrl+C) or change the port."
+        )
+        raise
