@@ -100,13 +100,23 @@ except Exception as e:
 
 # ---------------------------------------------------------------------
 # Initialise Dash App
-# ---------------------------------------------------------------------
+import os
+from flask import send_from_directory
+
 app = dash.Dash(
     __name__,
     external_stylesheets=[dbc.themes.BOOTSTRAP],
     title="NHFT Demand-Capacity Dashboard",
     suppress_callback_exceptions=True,
 )
+
+# Configure Flask to serve images folder
+images_dir = os.path.join(os.path.dirname(__file__), "../../images")
+
+
+@app.server.route("/images/<filename>")
+def serve_images(filename):
+    return send_from_directory(images_dir, filename)
 
 
 # ---------------------------------------------------------------------
@@ -1562,13 +1572,26 @@ app.layout = dbc.Container(
                     [
                         html.H1(
                             "NHFT Demand & Capacity Platform",
-                            className="text-center my-4",
+                            className="my-4",
                         ),
-                        html.Hr(),
-                    ]
-                )
-            ]
+                    ],
+                    width=10,
+                ),
+                dbc.Col(
+                    [
+                        html.Img(
+                            src="/images/NHFT.png",
+                            height="80px",
+                            className="my-4",
+                        ),
+                    ],
+                    width=2,
+                    className="text-end",
+                ),
+            ],
+            className="align-items-center",
         ),
+        html.Hr(),
         # Filters Row
         create_filter_section(),
         # Summary Statistics Row
