@@ -67,12 +67,16 @@ Future enhancement (dependent on improved workforce history + mapping):
 
 ### 4.4 Dash Application
 
-- Interactive visual dashboards
-- Tabs for Overview, Demand Analysis, and Capacity Analysis
-- Controls: date-range slider, service selection, percentile-based demand target setting, and per-chart forecast toggles
-- Accessible, interpretable design for operational managers
+Interactive web dashboard built with Plotly Dash and styled to the NHS Design System colour palette.
 
-For the current UI behaviour and data expectations, see `src/dashboard/README.md`.
+- **Four tabs:** About This Dashboard (methodology guide), Overview, Demand Analysis, and Capacity Analysis
+- **Filters:** month-based date-range slider, multi-select service dropdown, and a Clinician Patient Facing Time percentile selector (50–100%, default 60%) that drives demand benchmarking targets
+- **Headline KPI cards:** Referrals, Waiters, Caseload, Contacts, Discharges, Total Staff, plus derived metrics (Demand Ratio, Sustainable Caseload, Net Caseload Flow, Caseload Throughput, Clearance Time)
+- **Per-chart ETS forecast toggles:** optional 12-month Holt-Winters overlay with 95% confidence interval on each time-series chart
+- **Demand table:** service-line summary with Clock Stop Target, granular demand ratios, and contacts-per-caseload fields
+- **Capacity reference view:** staff-group and service-line bar charts, staff-vs-caseload scatter with trendline, and staffing pivot table
+
+For full UI behaviour, data expectations, and tab-by-tab detail see `src/dashboard/README.md`.
 
 ### 4.5 Data Limitations, Triangulation, and Capacity Approach
 
