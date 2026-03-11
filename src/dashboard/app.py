@@ -103,10 +103,44 @@ except Exception as e:
 import os
 from flask import send_from_directory
 
+# --- NHS Design System Colour Palette ---
+NHS_BLUE = "#005EB8"
+NHS_DARK_BLUE = "#003087"
+NHS_BRIGHT_BLUE = "#0072CE"
+NHS_LIGHT_BLUE = "#41B6E6"
+NHS_AQUA_GREEN = "#00A499"
+NHS_GREEN = "#007F3B"
+NHS_LIGHT_GREEN = "#78BE20"
+NHS_YELLOW = "#FFB81C"
+NHS_ORANGE = "#ED8B00"
+NHS_RED = "#DA291C"
+NHS_DARK_RED = "#8A1538"
+NHS_PINK = "#AE2573"
+NHS_PURPLE = "#330072"
+NHS_BLACK = "#231F20"
+NHS_DARK_GREY = "#425563"
+NHS_MID_GREY = "#768692"
+NHS_PALE_GREY = "#E8EDEE"
+NHS_WHITE = "#FFFFFF"
+
+# Plotly chart colour cycle using NHS palette
+NHS_CHART_COLOURS = [
+    NHS_BLUE,
+    NHS_RED,
+    NHS_AQUA_GREEN,
+    NHS_ORANGE,
+    NHS_PURPLE,
+    NHS_LIGHT_BLUE,
+    NHS_GREEN,
+    NHS_PINK,
+    NHS_YELLOW,
+    NHS_DARK_BLUE,
+]
+
 app = dash.Dash(
     __name__,
     external_stylesheets=[dbc.themes.BOOTSTRAP],
-    title="NHFT Demand-Capacity Dashboard",
+    title="NHFT Demand & Capacity Dashboard",
     suppress_callback_exceptions=True,
 )
 
@@ -202,6 +236,18 @@ def _read_filtered_store_frame(data_json: str) -> pd.DataFrame:
 
 
 # Build and return a dashboard layout section or component.
+# Map logical colour names to NHS CSS modifier classes.
+_NHS_METRIC_CARD_CLASS = {
+    "primary": "",
+    "success": "nhs-metric-green",
+    "warning": "nhs-metric-yellow",
+    "info": "nhs-metric-aqua",
+    "danger": "nhs-metric-red",
+    "secondary": "nhs-metric-dark",
+    "dark": "nhs-metric-purple",
+}
+
+
 def create_metric_card(
     title: str,
     value: str,
@@ -221,6 +267,7 @@ def create_metric_card(
     Returns:
         A Dash Bootstrap Components Card.
     """
+    variant_cls = _NHS_METRIC_CARD_CLASS.get(color, "")
     card_content = [
         html.H4(
             [html.Span(icon, className="me-2"), title],
@@ -228,8 +275,7 @@ def create_metric_card(
         ),
         html.H2(
             value,
-            className="text-center mt-3",
-            style={"color": f"var(--bs-{color})"},
+            className="metric-value",
         ),
     ]
 
@@ -237,14 +283,13 @@ def create_metric_card(
         card_content.append(
             html.P(
                 description,
-                className="text-muted small text-center mt-2 mb-0",
-                style={"fontSize": "0.85rem"},
+                className="metric-description",
             )
         )
 
     return dbc.Card(
         [dbc.CardBody(card_content)],
-        className="mb-3 shadow-sm",
+        className=f"nhs-metric-card mb-3 {variant_cls}".strip(),
     )
 
 
@@ -853,112 +898,117 @@ def create_filter_section():
         {"label": f"{p}%", "value": p} for p in range(50, 101, 5)
     ]
 
-    return dbc.Row(
-        [
-            dbc.Col(
-                [
-                    dbc.Row(
-                        [
-                            dbc.Col(
-                                html.Label("Date Range:", className="fw-bold"),
-                                width="auto",
-                            ),
-                            dbc.Col(
-                                html.Div(
-                                    [
-                                        dcc.Store(
-                                            id="date-slider-dates",
-                                            data=slider_dates,
-                                        ),
-                                        html.Div(
-                                            id="date-range-slider-label",
-                                            className="text-muted small mb-1",
-                                        ),
-                                        dcc.RangeSlider(
-                                            id="date-range-slider",
-                                            min=0,
-                                            max=max(0, len(slider_dates) - 1),
-                                            step=1,
-                                            value=[default_start_idx, default_end_idx],
-                                            marks=marks,
-                                            allowCross=False,
-                                            tooltip={
-                                                "placement": "bottom",
-                                                "always_visible": False,
-                                            },
-                                        ),
-                                    ]
+    return html.Div(
+        dbc.Row(
+            [
+                dbc.Col(
+                    [
+                        dbc.Row(
+                            [
+                                dbc.Col(
+                                    html.Label("Date Range:", className="fw-bold"),
+                                    width="auto",
                                 ),
-                                width=True,
-                            ),
-                        ],
-                        className="align-items-center g-2",
-                    )
-                ],
-                width=4,
-            ),
-            dbc.Col(
-                [
-                    dbc.Row(
-                        [
-                            dbc.Col(
-                                html.Label("Service:", className="fw-bold"),
-                                width="auto",
-                            ),
-                            dbc.Col(
-                                dcc.Dropdown(
-                                    id="service-line-dropdown",
-                                    options=service_line_options,
-                                    multi=True,
-                                    placeholder="Select service(s) (all if none selected)",
+                                dbc.Col(
+                                    html.Div(
+                                        [
+                                            dcc.Store(
+                                                id="date-slider-dates",
+                                                data=slider_dates,
+                                            ),
+                                            html.Div(
+                                                id="date-range-slider-label",
+                                                className="text-muted small mb-1",
+                                            ),
+                                            dcc.RangeSlider(
+                                                id="date-range-slider",
+                                                min=0,
+                                                max=max(0, len(slider_dates) - 1),
+                                                step=1,
+                                                value=[
+                                                    default_start_idx,
+                                                    default_end_idx,
+                                                ],
+                                                marks=marks,
+                                                allowCross=False,
+                                                tooltip={
+                                                    "placement": "bottom",
+                                                    "always_visible": False,
+                                                },
+                                            ),
+                                        ]
+                                    ),
+                                    width=True,
                                 ),
-                                width=True,
-                            ),
-                        ],
-                        className="align-items-center g-2",
-                    )
-                ],
-                width=4,
-            ),
-            dbc.Col(
-                [
-                    dbc.Row(
-                        [
-                            dbc.Col(
-                                html.Label(
-                                    "Clinician Patient Facing Time:",
-                                    className="fw-bold",
+                            ],
+                            className="align-items-center g-2",
+                        )
+                    ],
+                    width=4,
+                ),
+                dbc.Col(
+                    [
+                        dbc.Row(
+                            [
+                                dbc.Col(
+                                    html.Label("Service:", className="fw-bold"),
+                                    width="auto",
                                 ),
-                                width="auto",
-                            ),
-                            dbc.Col(
-                                dcc.Dropdown(
-                                    id="demand-percentile-dropdown",
-                                    options=demand_percentile_options,
-                                    value=60,
-                                    clearable=False,
+                                dbc.Col(
+                                    dcc.Dropdown(
+                                        id="service-line-dropdown",
+                                        options=service_line_options,
+                                        multi=True,
+                                        placeholder="Select service(s) (all if none selected)",
+                                    ),
+                                    width=True,
                                 ),
-                                width=True,
-                            ),
-                        ],
-                        className="align-items-center g-2",
-                    )
-                ],
-                width=2,
-            ),
-            dbc.Col(
-                [
-                    dbc.Button(
-                        "Apply Filters",
-                        id="apply-filters-btn",
-                        color="primary",
-                        className="w-100",
-                    ),
-                ],
-                width=2,
-            ),
-        ],
-        className="mb-4 justify-content-center",
+                            ],
+                            className="align-items-center g-2",
+                        )
+                    ],
+                    width=4,
+                ),
+                dbc.Col(
+                    [
+                        dbc.Row(
+                            [
+                                dbc.Col(
+                                    html.Label(
+                                        "Clinician Patient Facing Time:",
+                                        className="fw-bold",
+                                    ),
+                                    width="auto",
+                                ),
+                                dbc.Col(
+                                    dcc.Dropdown(
+                                        id="demand-percentile-dropdown",
+                                        options=demand_percentile_options,
+                                        value=60,
+                                        clearable=False,
+                                    ),
+                                    width=True,
+                                ),
+                            ],
+                            className="align-items-center g-2",
+                        )
+                    ],
+                    width=2,
+                ),
+                dbc.Col(
+                    [
+                        dbc.Button(
+                            "Apply Filters",
+                            id="apply-filters-btn",
+                            className="nhs-btn-primary w-100",
+                        ),
+                    ],
+                    width=2,
+                ),
+            ],
+            className="justify-content-center",
+        ),
+        className="nhs-filter-bar mb-4",
     )
 
 
@@ -1277,7 +1327,7 @@ def _overview_key_metrics_figure(
 
     fig = go.Figure()
 
-    palette = px.colors.qualitative.Plotly
+    palette = NHS_CHART_COLOURS
     series = [
         ("Referrals", "referrals"),
         ("Waiters", "waiters"),
@@ -1563,77 +1613,88 @@ def _overview_key_metrics_figure(
 # ---------------------------------------------------------------------
 # Layout
 # ---------------------------------------------------------------------
-app.layout = dbc.Container(
+app.layout = html.Div(
     [
-        # Header
-        dbc.Row(
-            [
-                dbc.Col(
-                    [
-                        html.H1(
-                            "NHFT Demand & Capacity Platform",
-                            className="my-4",
-                        ),
-                    ],
-                    width=10,
-                ),
-                dbc.Col(
-                    [
-                        html.Img(
-                            src="/images/NHFT.png",
-                            height="80px",
-                            className="my-4",
-                        ),
-                    ],
-                    width=2,
-                    className="text-end",
-                ),
-            ],
-            className="align-items-center",
-        ),
-        html.Hr(),
-        # Filters Row
-        create_filter_section(),
-        # Summary Statistics Row
-        html.Div(id="summary-stats-row"),
-        # Main Content
-        dbc.Row(
-            [
-                dbc.Col(
-                    [
-                        # Tabs for different views
-                        dcc.Tabs(
-                            id="main-tabs",
-                            value="overview-tab",
-                            children=[
-                                dcc.Tab(
-                                    label="ℹ️ About This Dashboard",
-                                    value="about-tab",
-                                ),
-                                dcc.Tab(label="📈 Overview", value="overview-tab"),
-                                dcc.Tab(label="👥 Demand Analysis", value="demand-tab"),
-                                dcc.Tab(
-                                    label="💼 Capacity Analysis", value="capacity-tab"
-                                ),
-                            ],
-                            className="mb-3",
-                        ),
-                        # Tab Content
-                        html.Div(id="tab-content"),
-                    ],
-                    width=12,
-                ),
-            ]
-        ),
-        # Store filtered data
-        dcc.Store(id="filtered-data-store"),
-        # Footer
+        # NHS Header Banner
         html.Div(
-            id="footer-content",
-            className="footer mt-5 pt-4 pb-3 border-top",
+            dbc.Container(
+                dbc.Row(
+                    [
+                        dbc.Col(
+                            html.H1("NHFT Demand & Capacity Platform"),
+                            width=True,
+                        ),
+                        dbc.Col(
+                            html.Img(
+                                src="/images/NHFT.png",
+                                className="nhs-logo-img",
+                            ),
+                            width="auto",
+                            className="d-flex align-items-center",
+                        ),
+                    ],
+                    className="align-items-center",
+                ),
+                fluid=True,
+            ),
+            className="nhs-header",
         ),
-    ],
-    fluid=True,
+        # Body
+        dbc.Container(
+            [
+                # Filters Row
+                html.Div(className="mt-4"),
+                create_filter_section(),
+                # Summary Statistics Row
+                html.Div(id="summary-stats-row"),
+                # Main Content
+                dbc.Row(
+                    [
+                        dbc.Col(
+                            [
+                                dcc.Tabs(
+                                    id="main-tabs",
+                                    value="overview-tab",
+                                    children=[
+                                        dcc.Tab(
+                                            label="ℹ️  About This Dashboard",
+                                            value="about-tab",
+                                        ),
+                                        dcc.Tab(
+                                            label="📈  Overview",
+                                            value="overview-tab",
+                                        ),
+                                        dcc.Tab(
+                                            label="👥  Demand Analysis",
+                                            value="demand-tab",
+                                        ),
+                                        dcc.Tab(
+                                            label="💼  Capacity Analysis",
+                                            value="capacity-tab",
+                                        ),
+                                    ],
+                                    className="nhs-tabs mb-3",
+                                ),
+                                html.Div(id="tab-content"),
+                            ],
+                            width=12,
+                        ),
+                    ]
+                ),
+                # Store filtered data
+                dcc.Store(id="filtered-data-store"),
+            ],
+            fluid=True,
+        ),
+        # NHS Footer
+        html.Div(
+            dbc.Container(
+                html.Div(id="footer-content"),
+                fluid=True,
+            ),
+            className="nhs-footer",
+        ),
+    ]
 )
 
 
@@ -1861,11 +1922,11 @@ def update_footer(data_json):
 
     return html.P(
         [
-            "© 2025 Northamptonshire Healthcare NHS Foundation Trust | ",
-            "BI Development Team | ",
+            "© 2025 Northamptonshire Healthcare NHS Foundation Trust  |  ",
+            "BI Development Team  |  ",
             html.Strong(f"Latest Reporting Period End: {latest_period_end}"),
         ],
-        className="text-center text-muted mb-0",
+        className="text-center mb-0",
     )
 
 
@@ -1970,7 +2031,7 @@ def create_overview_tab(df, *, demand_percentile: Optional[int | float] = 60):
                 className="p-2",
             ),
         ],
-        className="mb-4 shadow-sm",
+        className="nhs-card mb-4",
     )
 
     # -----------------------------
@@ -1999,7 +2060,7 @@ def create_overview_tab(df, *, demand_percentile: Optional[int | float] = 60):
                             className="p-2",
                         ),
                     ],
-                    className="mb-4 shadow-sm",
+                    className="nhs-card mb-4",
                 )
 
     # -----------------------------
@@ -2019,7 +2080,7 @@ def create_overview_tab(df, *, demand_percentile: Optional[int | float] = 60):
                 className="p-2",
             ),
         ],
-        className="mb-4 shadow-sm",
+        className="nhs-card mb-4",
     )
 
     sustainable_caseload = _compute_sustainable_caseload_latest(
@@ -2102,8 +2163,7 @@ def create_overview_tab(df, *, demand_percentile: Optional[int | float] = 60):
                         "For best results, include at least 2 years of data when using forecasts."
                     ),
                 ],
-                color="info",
-                className="mt-4",
+                className="nhs-info-box mt-4",
             ),
             dcc.Store(
                 id="overview-keymetrics-visible-metrics",
@@ -2146,7 +2206,7 @@ def _waiters_18wk_breakdown_figure(
             x=x_dates,
             y=waiters_18wk["waiters_under_18_weeks"],
             name="Under 18 Weeks",
-            marker_color="#636EFA",
+            marker_color=NHS_BLUE,
             hovertemplate="%{fullData.name}: <b>%{y:,}</b><extra></extra>",
         )
     )
@@ -2155,7 +2215,7 @@ def _waiters_18wk_breakdown_figure(
             x=x_dates,
             y=waiters_18wk["waiters_over_18_weeks"],
             name="18+ Weeks",
-            marker_color="#EF553B",
+            marker_color=NHS_RED,
             hovertemplate="%{fullData.name}: <b>%{y:,}</b><extra></extra>",
         )
     )
@@ -2300,7 +2360,7 @@ def update_referrals_timeseries(data_json, forecast_on):
         df=df,
         metric="referrals",
         label="Referrals",
-        color="#636EFA",
+        color=NHS_BLUE,
         forecast_on=bool(forecast_on),
         monthly_ticks=False,
     )
@@ -2322,7 +2382,7 @@ def update_waiters_timeseries(data_json, forecast_on):
         df=df,
         metric="waiters",
         label="Waiters",
-        color="#EF553B",
+        color=NHS_RED,
         forecast_on=bool(forecast_on),
         monthly_ticks=False,
     )
@@ -2344,7 +2404,7 @@ def update_caseload_timeseries(data_json, forecast_on):
         df=df,
         metric="caseload",
         label="Caseload",
-        color="#00CC96",
+        color=NHS_AQUA_GREEN,
         forecast_on=bool(forecast_on),
         monthly_ticks=False,
     )
@@ -2366,7 +2426,7 @@ def update_contacts_timeseries(data_json, forecast_on):
         df=df,
         metric="total_contacts",
         label="Contacts",
-        color="#AB63FA",
+        color=NHS_PURPLE,
         forecast_on=bool(forecast_on),
         monthly_ticks=False,
     )
@@ -2391,7 +2451,7 @@ def update_discharges_timeseries(data_json, forecast_on):
         df=df,
         metric="discharges_with_clock_stop",
         label="Discharges",
-        color="#FFA15A",
+        color=NHS_ORANGE,
         forecast_on=bool(forecast_on),
         monthly_ticks=False,
     )
@@ -2449,13 +2509,14 @@ def create_service_line_summary_table(df: pd.DataFrame):
             }
         ],
         style_header={
-            "backgroundColor": "rgb(230, 230, 230)",
+            "backgroundColor": NHS_BLUE,
+            "color": NHS_WHITE,
             "fontWeight": "bold",
             "whiteSpace": "normal",
             "height": "auto",
         },
         style_data_conditional=[
-            {"if": {"row_index": "odd"}, "backgroundColor": "rgb(248, 248, 248)"}
+            {"if": {"row_index": "odd"}, "backgroundColor": "#F7F9FA"}
         ],
     )
 
@@ -2814,13 +2875,14 @@ def create_staffing_pivot_table(
             }
         ],
         style_header={
-            "backgroundColor": "rgb(230, 230, 230)",
+            "backgroundColor": NHS_BLUE,
+            "color": NHS_WHITE,
             "fontWeight": "bold",
             "whiteSpace": "normal",
             "height": "auto",
         },
         style_data_conditional=[
-            {"if": {"row_index": "odd"}, "backgroundColor": "rgb(248, 248, 248)"}
+            {"if": {"row_index": "odd"}, "backgroundColor": "#F7F9FA"}
         ],
     )
 
@@ -3250,7 +3312,7 @@ def create_demand_tab(df, *, demand_percentile: Optional[int | float] = 60):
                 className="p-2",
             ),
         ],
-        className="mb-4 shadow-sm",
+        className="nhs-card mb-4",
     )
 
     summary_table = create_service_line_summary_table(df)
@@ -3275,7 +3337,7 @@ def create_demand_tab(df, *, demand_percentile: Optional[int | float] = 60):
                 className="p-2",
             ),
         ],
-        className="mb-4 shadow-sm",
+        className="nhs-card mb-4",
     )
 
     discharge_quality_cards = html.Div(
@@ -3343,7 +3405,7 @@ def create_demand_tab(df, *, demand_percentile: Optional[int | float] = 60):
                     className="p-2",
                 ),
             ],
-            className="mb-4 shadow-sm",
+            className="nhs-card mb-4",
         )
 
     sustainable_caseload = _compute_sustainable_caseload_latest(
@@ -3423,8 +3485,7 @@ def create_demand_tab(df, *, demand_percentile: Optional[int | float] = 60):
                         "For best results, include at least 2 years of data when using forecasts."
                     ),
                 ],
-                color="info",
-                className="mt-4",
+                className="nhs-info-box mt-4",
             ),
             sustainable_card_row,
             dbc.Row(
@@ -3540,7 +3601,7 @@ def create_capacity_tab(df):
                     dbc.CardHeader(html.H5(title, className="mb-0")),
                     dbc.CardBody(dcc.Graph(id=graph_id, figure=fig), className="p-2"),
                 ],
-                className="mb-4 shadow-sm",
+                className="nhs-card mb-4",
             )
 
         capacity_graphs.append(
@@ -3581,7 +3642,7 @@ def create_capacity_tab(df):
                                     className="p-2",
                                 ),
                             ],
-                            className="mb-4 shadow-sm",
+                            className="nhs-card mb-4",
                         ),
                         width=12,
                     ),
@@ -3621,8 +3682,7 @@ def create_capacity_tab(df):
                     ),
                     staffing_error if staffing_error is not None else None,
                 ],
-                color="info",
-                className="mt-4",
+                className="nhs-info-box mt-4",
             ),
             *capacity_graphs,
             dbc.Row(
@@ -3655,8 +3715,7 @@ def create_about_tab():
                         "and how to interpret the data across each tab."
                     ),
                 ],
-                color="info",
-                className="mt-4",
+                className="nhs-info-box mt-4",
             ),
             # --- Purpose ---
             dbc.Card(
@@ -3679,7 +3738,7 @@ def create_about_tab():
                         ]
                     ),
                 ],
-                className="mb-4 shadow-sm",
+                className="nhs-card mb-4",
             ),
             # --- How Demand Is Measured ---
             dbc.Card(
@@ -3716,7 +3775,7 @@ def create_about_tab():
                         ]
                     ),
                 ],
-                className="mb-4 shadow-sm",
+                className="nhs-card mb-4",
             ),
             # --- Key Operational Metrics ---
             dbc.Card(
@@ -3751,7 +3810,7 @@ def create_about_tab():
                         ]
                     ),
                 ],
-                className="mb-4 shadow-sm",
+                className="nhs-card mb-4",
             ),
             # --- Tabs in the Dashboard ---
             dbc.Card(
@@ -3787,7 +3846,7 @@ def create_about_tab():
                         ]
                     ),
                 ],
-                className="mb-4 shadow-sm",
+                className="nhs-card mb-4",
             ),
             # --- Forecasting ---
             dbc.Card(
@@ -3807,7 +3866,7 @@ def create_about_tab():
                         ]
                     ),
                 ],
-                className="mb-4 shadow-sm",
+                className="nhs-card mb-4",
             ),
             # --- Data & Refresh ---
             dbc.Card(
@@ -3829,7 +3888,7 @@ def create_about_tab():
                         ]
                     ),
                 ],
-                className="mb-4 shadow-sm",
+                className="nhs-card mb-4",
             ),
             # --- Data Limitations ---
             dbc.Card(
@@ -3879,7 +3938,7 @@ def create_about_tab():
                         ]
                     ),
                 ],
-                className="mb-4 shadow-sm",
+                className="nhs-card mb-4",
             ),
         ]
     )
