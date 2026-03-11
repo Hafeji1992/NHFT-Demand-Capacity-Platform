@@ -57,9 +57,25 @@ body {
     color: var(--nhs-white);
 }
 
+.nhs-logo-wrapper {
+    position: relative;
+    display: inline-block;
+}
+
 .nhs-header .nhs-logo-img {
     height: 48px;
     filter: brightness(0) invert(1);
+    display: block;
+}
+
+.nhs-header .nhs-logo-overlay {
+    position: absolute;
+    top: 0;
+    right: 0;
+    height: 45%;
+    width: auto;
+    object-fit: contain;
+    object-position: right top;
 }
 
 /* --- Cards --- */

@@ -1625,9 +1625,18 @@ app.layout = html.Div(
                             width=True,
                         ),
                         dbc.Col(
-                            html.Img(
-                                src="/images/NHFT.png",
-                                className="nhs-logo-img",
+                            html.Div(
+                                [
+                                    html.Img(
+                                        src="/images/NHFT.svg",
+                                        className="nhs-logo-img",
+                                    ),
+                                    html.Img(
+                                        src="/images/NHS.jpg",
+                                        className="nhs-logo-overlay",
+                                    ),
+                                ],
+                                className="nhs-logo-wrapper",
                             ),
                             width="auto",
                             className="d-flex align-items-center",
