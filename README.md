@@ -5,7 +5,7 @@ A configurable Demand and Capacity analytics platform for NHFT, featuring automa
 
 ## 1. Overview
 
-This project develops a Demand and Capacity Modelling Platform for Northamptonshire Healthcare NHS Foundation Trust (NHFT). It forms part of the ZDAT3001 Year 3 Work-Based Project and aims to address a key organisational need: improving forecasting accuracy, capacity planning, and operational decision-making across 500+ community, mental health, and specialist services.
+This project develops a Demand and Capacity Modelling Platform for Northamptonshire Healthcare NHS Foundation Trust (NHFT). It forms part of the ZDAT3001 Year 3 Work-Based Project and aims to address a key organisational need: improving forecasting accuracy, capacity planning, and operational decision-making across 125 current community, mental health, and specialist services.
 
 The platform integrates:
 
