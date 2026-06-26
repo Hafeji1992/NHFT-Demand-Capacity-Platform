@@ -252,7 +252,7 @@ As defined in the Project Plan (Section 2, p. 1) :
 | Capacity & Simulation Module           | ✅ Completed (Re-scoped) | Mid Feb 2026      | 09/02/2026      | 30           | Pivoted (WC 09/02/2026): simulation/queueing de-scoped due to no workforce time series + service-line mapping misalignment; delivered reference-based capacity view (snapshot staffing mix/allocations) in dashboard |
 | Dash Application Development           | ✅ Completed   | End Feb 2026      | 19/02/2026    | 15           | Interactive dashboard (Overview/Demand/Capacity tabs, filters, percentile-based targets, derived tables, ETS forecast toggles; staffing snapshot used as reference) |
 | Testing, Validation & Refinement       | ✅ Completed  | End Feb 2026      | 09/03/2026     | 22.5           | Forecast evaluation, stakeholder testing |
-| Documentation & Final Presentation Prep| ⏳ Upcoming  | June 2026         | —               | 7.5           | Written portfolio, slides, video pitch |
+| Documentation & Final Presentation Prep| ✅ Completed  | June 2026         | 15/06/2026     | 7.5           | Written portfolio, slides, video pitch |
 
 Milestones taken from the Project Plan timeline (Section 6, pp. 3–4) .
 
