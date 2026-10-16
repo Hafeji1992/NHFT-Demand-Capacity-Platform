@@ -1,6 +1,13 @@
 # Testing & Validation (Module 7)
 
-This folder contains the project’s `pytest` suite and short notes that map the tests back to the **Testing_&_Validation** assessment items.
+This folder contains the project’s `pytest` suite, the ETS forecast backtest, and short notes that map them back to the **Testing_&_Validation** assessment items.
+
+| File | Type | Covers |
+|---|---|---|
+| `ets_backtest.py` | Standalone script (rolling-origin backtest) | 7.1 |
+| `test_sql_connection.py` | `pytest` integration test | 7.3 |
+| `test_patient_data_ingestion.py` | `pytest` unit tests | 7.3 |
+| `test_staffing_data_ingestion.py` | `pytest` unit tests | 7.3 |
 
 Run all tests from the repo root:
 
@@ -8,27 +15,76 @@ Run all tests from the repo root:
 pytest -q
 ```
 
+Run the backtest from the repo root (it is a script, not a `pytest` test, so `pytest` does not pick it up):
+
+```bash
+python src/tests/ets_backtest.py --end-date 2026-02-28 --sarima --jobs 6
+```
+
 > Note: One test (`test_sql_connection.py`) is an **integration** check against a real SQL Server connection and may require valid credentials/config on the machine it’s run on.
 
 ---
 
-## 7.1 Compare Forecasts Against Actuals → Implemented as AIC (Model Selection)
+## 7.1 Compare Forecasts Against Actuals → AIC Model Selection + Rolling-Origin Backtest
 
 ### What I did
-Instead of implementing a full backtesting workflow with RMSE/MAE, the forecasting component performs **model selection using AIC (Akaike Information Criterion)**.
+Forecast accuracy is validated in two layers:
 
-In this project, the ETS forecast specification is selected by searching a small grid of candidate configurations and choosing the one with the **lowest AIC**:
+1. **Model selection (in-sample) using AIC.** For each series, the ETS (Holt-Winters) specification is chosen from a small grid of candidate configurations by **lowest AIC**.
+   - Model selection logic: `small_grid_search_aic_ets(...)` in `src/forecasting/ets.py`
+   - Dashboard usage (per-metric, per-filter-state): ETS selection + caching in `src/dashboard/app.py`
+2. **Out-of-sample validation using a rolling-origin backtest.** `ets_backtest.py` compares forecasts against what actually happened, using only data that would have been available at each forecast origin.
 
-- Model selection logic: `small_grid_search_aic_ets(...)` in `src/forecasting/ets.py`
-- Dashboard usage (per-metric, per-filter-state): ETS selection + caching in `src/dashboard/app.py`
+### Why AIC for selection
+- **Works without an explicit holdout set**: in the dashboard the user changes filters (service line, date range) frequently, so a fixed train/test split inside each callback would be unstable and slow.
+- **Balances fit vs complexity**: AIC penalises model complexity, which discourages overfitting when comparing ETS configurations.
+- **Fast enough for interactive use**: AIC comes straight from the fitted model, so selection stays responsive inside callbacks.
 
-### Why AIC (in this iteration)
-- **Works without an explicit holdout set**: RMSE/MAE require an “actuals vs forecast” comparison on unseen periods (e.g., rolling-origin evaluation). In this dashboard-led workflow the user can change filters (service line, date range) frequently, making a fixed train/test split less stable and more complex to explain.
-- **Balances fit vs complexity**: AIC explicitly penalises model complexity, so it discourages overfitting when comparing multiple ETS configurations.
-- **Fast enough for interactive use**: AIC can be computed from the fitted model results and used for lightweight selection with a small search space, which is important for responsiveness inside callbacks.
+AIC is an **in-sample** criterion and does not on its own guarantee good out-of-sample accuracy. The backtest checks that.
 
-### Limitation (and future extension)
-AIC is primarily an **in-sample** criterion; it does not guarantee the best out-of-sample accuracy. A natural next step (if required) would be to add a rolling backtest that reports RMSE/MAE over the last *k* months for each service line and selected metric.
+### How the backtest works
+- Each service's monthly series (default metric: `referrals`) is built the same way the platform builds it (`build_monthly_series(...)`).
+- An **expanding training window** is rolled forward one month at a time. At each origin the ETS specification is **re-selected by AIC on the training data only** (no leakage), the model is refitted, and the next **6 months** are forecast.
+- Defaults: minimum 24 months of training, horizon 6, step 1. Services with too little history are excluded; folds with an all-zero training window are skipped.
+- ETS is compared with three simple **baselines**: naive (last value), seasonal naive (same month last year), and the mean of the last 12 months.
+- With `--sarima`, the **archived SARIMA forecaster** (`src/forecasting/archived_sarima`) is backtested on the same folds. Its order is selected once per service on the first training window (or at every origin with `--sarima-reselect`).
+
+**Metrics reported:** pooled WAPE, MASE (scaled by in-sample seasonal-naive error; below 1 beats seasonal naive), per-service win rates, error by horizon, empirical coverage of the 95% prediction interval, and Wilcoxon signed-rank tests on per-service MAE differences.
+
+**Outputs** (written to `data/`):
+- `backtest_ets_results.csv`: every forecast point (origin, horizon, actual, each model's forecast, ETS interval, chosen spec, fit time)
+- `backtest_ets_results_by_service.csv`: per-service MAE / MASE / coverage
+- `backtest_ets_results_sarima_by_service.csv`: per-service ETS vs SARIMA (when `--sarima` is used)
+
+### Results (referrals, data to Feb 2026)
+105 services, 618 folds (origins Mar–Aug 2025), 3,708 forecast points, 6-month horizon.
+
+| Model | Pooled WAPE | Median MASE |
+|---|---|---|
+| **ETS (production)** | **13.4%** | 0.89 |
+| Naive | 14.3% | 1.02 |
+| 12-month mean | 19.6% | 0.83 |
+| SARIMA (archived) | 19.5% | 1.04 |
+| Seasonal naive | 22.7% | 0.99 |
+
+| Comparison (per-service MAE) | ETS win rate | Wilcoxon p (n = 105) |
+|---|---|---|
+| ETS vs seasonal naive | 60.0% | 0.008 |
+| ETS vs naive | 66.7% | not tested |
+| ETS vs 12-month mean | 41.9% | 0.063 |
+| ETS vs SARIMA | 73.3% | < 0.001 |
+
+95% interval coverage: **ETS 90.4%**, SARIMA 72.6%. All SARIMA folds produced a forecast, so the ETS vs SARIMA comparison uses the same points.
+
+### What the results show
+- ETS has the **lowest pooled error** of every model tested, and beats seasonal naive by a statistically significant margin (p = 0.008).
+- ETS clearly outperforms the **SARIMA model it replaced**: lower error on 73% of services (p < 0.001) and much better-calibrated intervals (90% vs 73%). This supports the decision to move from SARIMA to ETS.
+- The **12-month mean** has a slightly lower median MASE and beats ETS on more services (58%), but the difference is not significant (p = 0.063). Pooled WAPE favours ETS because ETS does better on the larger services. On smaller, flatter series a simple average is just as good.
+- ETS 95% intervals cover **90%** of actuals, so they are a little too narrow. Users should read them as a guide, not a strict 95% guarantee.
+
+### Limitations
+- The backtest covers one metric (`referrals`) and six origins per service. Other metrics and longer histories could behave differently.
+- The backtest runs offline. It is not run inside the dashboard, which still selects models by AIC for speed.
 
 ---
 

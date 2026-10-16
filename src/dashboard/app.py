@@ -46,7 +46,7 @@ from forecasting.ets import EtsSpec, small_grid_search_aic_ets
 # input series signature.
 #
 # If the design requiresETS to re-run on every callback (no caching), set this to False.
-ETS_CACHE_ENABLED = False
+ETS_CACHE_ENABLED = True
 _FORECAST_CACHE_MAX = 64
 _SPEC_CACHE_MAX = 128
 _forecast_frame_cache: "OrderedDict[tuple, pd.DataFrame]" = OrderedDict()

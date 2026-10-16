@@ -255,14 +255,14 @@ def main() -> int:
     parser.add_argument(
         "--metric",
         type=str,
-        default="referrals",
-        help="Metric column to forecast (e.g., referrals, waiters, staff)",
+        default="Referrals",
+        help="Metric column to forecast (e.g., Referrals, Waiters, Staff)",
     )
     parser.add_argument(
         "--date-col",
         type=str,
-        default="period_end",
-        help="Date column name (default: period_end)",
+        default="PeriodEnd",
+        help="Date column name (default: PeriodEnd)",
     )
     parser.add_argument(
         "--months-ahead",
