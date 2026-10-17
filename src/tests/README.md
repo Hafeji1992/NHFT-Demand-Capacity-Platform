@@ -57,7 +57,7 @@ AIC is an **in-sample** criterion and does not on its own guarantee good out-of-
 - `backtest_ets_results_sarima_by_service.csv`: per-service ETS vs SARIMA (when `--sarima` is used)
 
 ### Results (referrals, data to Feb 2026)
-105 services, 618 folds (origins Mar–Aug 2025), 3,708 forecast points, 6-month horizon.
+105 services, 618 folds (origins Mar–Aug 2025), 3,708 forecast points, 6-month horizon. AIC chose a level-only model in 48% of fits, a seasonal model in 40% and a trend in 27%.
 
 | Model | Pooled WAPE | Median MASE |
 |---|---|---|
