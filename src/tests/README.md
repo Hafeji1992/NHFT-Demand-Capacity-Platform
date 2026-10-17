@@ -57,7 +57,7 @@ AIC is an **in-sample** criterion and does not on its own guarantee good out-of-
 - `backtest_ets_results_sarima_by_service.csv`: per-service ETS vs SARIMA (when `--sarima` is used)
 
 ### Results (referrals, data to Feb 2026)
-105 services, 618 folds (origins Mar–Aug 2025), 3,708 forecast points, 6-month horizon. AIC chose a level-only model in 48% of fits, a seasonal model in 40% and a trend in 27%.
+105 services, 618 folds (origins Mar–Aug 2025), 3,708 forecast points, 6-month horizon. 
 
 | Model | Pooled WAPE | Median MASE |
 |---|---|---|
@@ -74,7 +74,7 @@ AIC is an **in-sample** criterion and does not on its own guarantee good out-of-
 | ETS vs 12-month mean | 41.9% | 0.063 |
 | ETS vs SARIMA | 73.3% | < 0.001 |
 
-95% interval coverage: **ETS 90.4%**, SARIMA 72.6%. All SARIMA folds produced a forecast, so the ETS vs SARIMA comparison uses the same points.
+95% interval coverage: **ETS 90.4%**, SARIMA 72.6%. All SARIMA folds produced a forecast, so the ETS vs SARIMA comparison uses the same points. AIC chose a level-only model in 48% of fits, a seasonal model in 40% and a trend in 27%.
 
 ### What the results show
 - ETS has the **lowest pooled error** of every model tested, and beats seasonal naive by a statistically significant margin (p = 0.008).
